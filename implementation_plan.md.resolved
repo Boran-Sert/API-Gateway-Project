@@ -1,0 +1,1391 @@
+# Mikroservis Mimarisi ve API Gateway — Uçtan Uca Tasarım
+
+## Genel Bakış
+
+Bilişim Sistemleri Mühendisliği bitirme projesi için endüstri standartlarında bir **Mikroservis Mimarisi** tasarımı. Tek giriş noktası olan bir **API Gateway (Dispatcher)**, merkezi Redis tabanlı yetkilendirme, servis başına bağımsız MongoDB veritabanları, Docker ağ izolasyonu, TDD geliştirme disiplini, HATEOAS uyumlu REST API'ler ve Grafana ile izleme altyapısını kapsar.
+
+**Teknoloji Yığını:** Python 3.11+ · FastAPI · Pytest · Redis · MongoDB · Docker · Locust · Prometheus · Grafana
+
+---
+
+## 1. Sistem Mimarisi Diyagramı
+
+```mermaid
+graph TB
+    subgraph EXTERNAL["🌐 Dış Ağ — public_network"]
+        CLIENT["🧑‍💻 İstemci<br/>(Browser / Postman / Locust)"]
+    end
+
+    subgraph GATEWAY_NET["🛡️ Gateway Ağı — gateway_network"]
+        DISPATCHER["⚡ Dispatcher<br/>(API Gateway)<br/>:8000"]
+        REDIS["🔴 Redis<br/>(Auth Token Store)<br/>:6379"]
+        PROMETHEUS["📊 Prometheus<br/>:9090"]
+        GRAFANA["📈 Grafana<br/>:3000"]
+    end
+
+    subgraph INTERNAL_NET["🔒 İç Ağ — internal_network"]
+        AUTH["🔐 Auth Service<br/>:8001"]
+        USER_SVC["👤 User Service<br/>:8002"]
+        PRODUCT_SVC["📦 Product Service<br/>:8003"]
+        MONGO_AUTH["🍃 MongoDB<br/>(auth_db)"]
+        MONGO_USER["🍃 MongoDB<br/>(user_db)"]
+        MONGO_PRODUCT["🍃 MongoDB<br/>(product_db)"]
+    end
+
+    CLIENT -->|"HTTP/HTTPS"| DISPATCHER
+    DISPATCHER -->|"Token Doğrulama"| REDIS
+    DISPATCHER -->|"Proxy"| AUTH
+    DISPATCHER -->|"Proxy"| USER_SVC
+    DISPATCHER -->|"Proxy"| PRODUCT_SVC
+    AUTH --> MONGO_AUTH
+    AUTH -->|"Token Oluştur/Sil"| REDIS
+    USER_SVC --> MONGO_USER
+    PRODUCT_SVC --> MONGO_PRODUCT
+    PROMETHEUS -->|"Scrape /metrics"| DISPATCHER
+    PROMETHEUS -->|"Scrape /metrics"| AUTH
+    PROMETHEUS -->|"Scrape /metrics"| USER_SVC
+    PROMETHEUS -->|"Scrape /metrics"| PRODUCT_SVC
+    GRAFANA -->|"Query"| PROMETHEUS
+
+    style EXTERNAL fill:#1a1a2e,stroke:#e94560,color:#fff
+    style GATEWAY_NET fill:#16213e,stroke:#0f3460,color:#fff
+    style INTERNAL_NET fill:#0f3460,stroke:#533483,color:#fff
+    style DISPATCHER fill:#e94560,stroke:#fff,color:#fff
+    style REDIS fill:#d63031,stroke:#fff,color:#fff
+    style AUTH fill:#00b894,stroke:#fff,color:#fff
+    style USER_SVC fill:#0984e3,stroke:#fff,color:#fff
+    style PRODUCT_SVC fill:#6c5ce7,stroke:#fff,color:#fff
+```
+
+### İstek Akış Diyagramı
+
+```mermaid
+sequenceDiagram
+    participant C as 🧑‍💻 İstemci
+    participant D as ⚡ Dispatcher
+    participant R as 🔴 Redis
+    participant A as 🔐 Auth Service
+    participant U as 👤 User Service
+
+    Note over C,U: 1. Oturum Açma (Login) Akışı
+    C->>D: POST /api/v1/auth/login {email, password}
+    D->>A: POST /login (iç ağ)
+    A->>A: Kimlik bilgisi doğrulama
+    A->>R: SET token → user_id (TTL: 3600s)
+    A-->>D: 200 {token, _links}
+    D-->>C: 200 {token, _links}
+
+    Note over C,U: 2. Korumalı Kaynak Erişimi
+    C->>D: GET /api/v1/users/me [Authorization: Bearer <token>]
+    D->>R: GET token → user_id
+    R-->>D: user_id (geçerli)
+    D->>U: GET /users/me [X-User-Id: user_id] (iç ağ)
+    U-->>D: 200 {user, _links}
+    D-->>C: 200 {user, _links}
+
+    Note over C,U: 3. Geçersiz Token Senaryosu
+    C->>D: GET /api/v1/users/me [Authorization: Bearer <expired>]
+    D->>R: GET token
+    R-->>D: null
+    D-->>C: 401 {detail: "Unauthorized", _links: {login: ...}}
+```
+
+---
+
+## 2. Docker Ağ İzolasyonu Tasarımı
+
+> [!IMPORTANT]
+> Mikroservisler dışarıdan **asla erişilemez**. Yalnızca Dispatcher dış dünyaya port açar.
+
+### Ağ Topolojisi
+
+| Ağ Adı | Tip | Bağlı Konteynerler | Dış Port |
+|---|---|---|---|
+| `public_network` | bridge | Dispatcher, Grafana, Prometheus | 8000, 3000, 9090 |
+| `gateway_network` | bridge | Dispatcher, Redis | — |
+| `internal_network` | internal | Dispatcher, Auth, User, Product, MongoDB'ler | — |
+
+```yaml
+# docker-compose.yml — Ağ Tanımları
+networks:
+  public_network:
+    driver: bridge
+  gateway_network:
+    driver: bridge
+  internal_network:
+    driver: bridge
+    internal: true  # ← Dışarıdan erişimi tamamen engeller
+```
+
+### Servis-Ağ Eşlemesi
+
+```yaml
+services:
+  dispatcher:
+    ports:
+      - "8000:8000"          # Tek dış erişim noktası
+    networks:
+      - public_network
+      - gateway_network
+      - internal_network
+
+  redis:
+    networks:
+      - gateway_network      # Yalnızca Dispatcher erişir
+    # ports YOK → dışarıya kapalı
+
+  auth-service:
+    networks:
+      - internal_network     # Yalnızca iç ağda
+    # ports YOK → dışarıya kapalı
+
+  user-service:
+    networks:
+      - internal_network
+  
+  product-service:
+    networks:
+      - internal_network
+
+  mongo-auth:
+    networks:
+      - internal_network
+
+  mongo-user:
+    networks:
+      - internal_network
+
+  mongo-product:
+    networks:
+      - internal_network
+```
+
+> [!TIP]
+> `internal: true` flag'i, Docker'ın bu ağdaki konteynerler için **dış dünyaya NAT/routing kuralı oluşturmamasını** sağlar. Bu sayede `auth-service`, `user-service`, `product-service` ve MongoDB'ler yalnızca `internal_network` üzerinden birbirleriyle ve Dispatcher ile iletişim kurabilir.
+
+---
+
+## 3. Proje Dosya Yapısı
+
+```
+microservice-graduation-project/
+├── docker-compose.yml
+├── docker-compose.monitoring.yml
+├── .env.example
+├── README.md
+│
+├── dispatcher/                      # API Gateway
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py                  # FastAPI uygulaması
+│   │   ├── config.py                # Ortam değişkenleri
+│   │   ├── middleware/
+│   │   │   ├── __init__.py
+│   │   │   ├── auth_middleware.py   # Redis token doğrulama
+│   │   │   └── rate_limiter.py
+│   │   ├── routes/
+│   │   │   ├── __init__.py
+│   │   │   ├── proxy.py             # Servis yönlendirme
+│   │   │   └── health.py
+│   │   ├── services/
+│   │   │   ├── __init__.py
+│   │   │   └── service_registry.py  # Servis keşfi
+│   │   └── core/
+│   │       ├── __init__.py
+│   │       ├── exceptions.py        # Merkezi hata yönetimi
+│   │       └── hateoas.py           # HATEOAS link builder
+│   └── tests/
+│       ├── __init__.py
+│       ├── conftest.py              # Shared fixtures
+│       ├── test_auth_middleware.py
+│       ├── test_proxy.py
+│       ├── test_rate_limiter.py
+│       └── test_hateoas.py
+│
+├── auth-service/                    # Oturum Açma Servisi
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── controllers/
+│   │   │   ├── __init__.py
+│   │   │   └── auth_controller.py
+│   │   ├── services/
+│   │   │   ├── __init__.py
+│   │   │   └── auth_service.py
+│   │   ├── repositories/
+│   │   │   ├── __init__.py
+│   │   │   ├── base.py              # Abstract Repository
+│   │   │   └── user_credential_repo.py
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   ├── domain.py            # Pydantic domain modelleri
+│   │   │   └── schemas.py           # Request/Response şemaları
+│   │   └── core/
+│   │       ├── __init__.py
+│   │       ├── exceptions.py
+│   │       ├── hateoas.py
+│   │       └── security.py          # Password hashing
+│   └── tests/
+│       ├── conftest.py
+│       ├── unit/
+│       │   ├── test_auth_service.py
+│       │   └── test_security.py
+│       └── integration/
+│           └── test_auth_api.py
+│
+├── user-service/                    # Kullanıcı Servisi
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── controllers/
+│   │   │   └── user_controller.py
+│   │   ├── services/
+│   │   │   └── user_service.py
+│   │   ├── repositories/
+│   │   │   ├── base.py
+│   │   │   └── user_repo.py
+│   │   ├── models/
+│   │   │   ├── domain.py
+│   │   │   └── schemas.py
+│   │   └── core/
+│   │       ├── exceptions.py
+│   │       └── hateoas.py
+│   └── tests/
+│       ├── conftest.py
+│       ├── unit/
+│       │   └── test_user_service.py
+│       └── integration/
+│           └── test_user_api.py
+│
+├── product-service/                 # Ürün Servisi
+│   ├── (user-service ile aynı yapı)
+│
+├── shared/                          # Paylaşılan kütüphane
+│   ├── __init__.py
+│   ├── base_repository.py           # Abstract base class
+│   ├── base_service.py
+│   ├── hateoas.py                   # HATEOAS utilities
+│   ├── exceptions.py                # Ortak hata sınıfları
+│   └── middleware.py                # Ortak middleware'ler
+│
+├── monitoring/
+│   ├── prometheus/
+│   │   └── prometheus.yml
+│   └── grafana/
+│       └── dashboards/
+│           └── dispatcher-dashboard.json
+│
+└── load-tests/
+    ├── locustfile.py
+    └── k6/
+        └── load_test.js
+```
+
+---
+
+## 4. TDD Stratejisi ve Commit Disiplini
+
+### 4.1 Red-Green-Refactor Döngüsü
+
+```mermaid
+graph LR
+    RED["🔴 RED<br/>Başarısız test yaz"]
+    GREEN["🟢 GREEN<br/>Testi geçecek<br/>minimum kodu yaz"]
+    REFACTOR["🔵 REFACTOR<br/>Kodu iyileştir,<br/>testler hâlâ geçmeli"]
+    
+    RED --> GREEN --> REFACTOR --> RED
+
+    style RED fill:#e74c3c,stroke:#c0392b,color:#fff
+    style GREEN fill:#27ae60,stroke:#219a52,color:#fff
+    style REFACTOR fill:#2980b9,stroke:#2471a3,color:#fff
+```
+
+### 4.2 Git Commit Stratejisi (Zaman Damgası Kanıtı)
+
+TDD'nin kanıtlanması için test dosyasının **her zaman** uygulama kodundan önce commit edilmesi gerekir:
+
+```bash
+# Adım 1: Önce başarısız testi yaz ve commit et
+git add auth-service/tests/unit/test_auth_service.py
+git commit -m "test(auth): add failing test for login with invalid credentials
+
+- RED phase: test_login_invalid_credentials expects 401 response
+- Test written BEFORE implementation"
+
+# Adım 2: Testi geçirecek kodu yaz ve commit et
+git add auth-service/app/services/auth_service.py
+git commit -m "feat(auth): implement login validation logic
+
+- GREEN phase: minimum code to pass test_login_invalid_credentials
+- Validates email/password against MongoDB credentials"
+
+# Adım 3: Refactor ve commit et
+git add auth-service/app/services/auth_service.py
+git commit -m "refactor(auth): extract password hashing to security module
+
+- REFACTOR phase: all tests still passing
+- Moved bcrypt logic to core/security.py for reusability"
+```
+
+### 4.3 Pytest Yapılandırması
+
+```ini
+# pytest.ini (her servis kök dizininde)
+[pytest]
+testpaths = tests
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+markers =
+    unit: Unit testler (mock kullanır)
+    integration: Entegrasyon testleri (gerçek DB gerektirir)
+    e2e: Uçtan uca testler
+addopts = -v --tb=short --strict-markers --cov=app --cov-report=term-missing
+```
+
+```python
+# tests/conftest.py — Paylaşılan Fixture'lar
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+from httpx import AsyncClient, ASGITransport
+from app.main import app
+
+
+@pytest.fixture
+def mock_mongo_collection():
+    """MongoDB collection mock'u — unit testler için."""
+    collection = MagicMock()
+    collection.find_one = AsyncMock()
+    collection.insert_one = AsyncMock()
+    collection.update_one = AsyncMock()
+    collection.delete_one = AsyncMock()
+    return collection
+
+
+@pytest.fixture
+async def async_client():
+    """FastAPI test istemcisi — integration testler için."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
+@pytest.fixture
+def sample_user():
+    """Test kullanıcı verisi."""
+    return {
+        "email": "test@example.com",
+        "password": "SecurePass123!",
+        "full_name": "Test Kullanıcı",
+    }
+```
+
+---
+
+## 5. Hata Yönetimi — Sahte 200 Yasağı
+
+> [!CAUTION]
+> API asla başarısız bir işlem için `HTTP 200` dönmemelidir. Her hata durumu uygun HTTP durum koduyla temsil edilmelidir.
+
+### Merkezi Hata Yapısı
+
+```python
+# shared/exceptions.py
+from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
+
+
+class AppException(Exception):
+    """Tüm uygulama hatalarının temel sınıfı."""
+    def __init__(self, status_code: int, detail: str, error_code: str):
+        self.status_code = status_code
+        self.detail = detail
+        self.error_code = error_code
+
+
+class NotFoundException(AppException):
+    def __init__(self, resource: str, resource_id: str):
+        super().__init__(
+            status_code=404,
+            detail=f"{resource} bulunamadı: {resource_id}",
+            error_code="RESOURCE_NOT_FOUND",
+        )
+
+
+class UnauthorizedException(AppException):
+    def __init__(self, detail: str = "Geçersiz veya süresi dolmuş token"):
+        super().__init__(
+            status_code=401,
+            detail=detail,
+            error_code="UNAUTHORIZED",
+        )
+
+
+class ConflictException(AppException):
+    def __init__(self, detail: str):
+        super().__init__(
+            status_code=409,
+            detail=detail,
+            error_code="CONFLICT",
+        )
+
+
+# FastAPI exception handler olarak kayıt
+async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": {
+                "code": exc.error_code,
+                "detail": exc.detail,
+            },
+            "_links": {
+                "self": {"href": str(request.url), "method": request.method},
+                "docs": {"href": "/docs"},
+            },
+        },
+    )
+```
+
+### HTTP Durum Kodu Haritası
+
+| Durum | Kod | Kullanım |
+|---|---|---|
+| Başarılı oluşturma | `201 Created` | Kayıt, token oluşturma |
+| Kaynak yok | `204 No Content` | Silme başarılı |
+| Geçersiz istek | `400 Bad Request` | Validasyon hataları |
+| Yetkisiz | `401 Unauthorized` | Token eksik/geçersiz |
+| Yasak | `403 Forbidden` | Yetersiz yetki seviyesi |
+| Bulunamadı | `404 Not Found` | Kaynak mevcut değil |
+| Çakışma | `409 Conflict` | Duplicate email vb. |
+| Sunucu hatası | `500 Internal Server Error` | Beklenmeyen hatalar |
+| Servis kapalı | `503 Service Unavailable` | Downstream servis erişilemez |
+
+---
+
+## 6. RMM Seviye 3 — HATEOAS Uygulaması
+
+### 6.1 HATEOAS Link Builder
+
+```python
+# shared/hateoas.py
+from typing import Any
+
+
+class HateoasLink:
+    """Tek bir HATEOAS linkini temsil eder."""
+    def __init__(self, href: str, method: str = "GET", rel: str | None = None):
+        self.href = href
+        self.method = method
+        self.rel = rel
+
+    def to_dict(self) -> dict[str, str]:
+        result = {"href": self.href, "method": self.method}
+        if self.rel:
+            result["rel"] = self.rel
+        return result
+
+
+class HateoasBuilder:
+    """HATEOAS uyumlu response oluşturur."""
+    
+    def __init__(self, base_url: str = "/api/v1"):
+        self.base_url = base_url
+
+    def build_response(
+        self, data: dict[str, Any], links: dict[str, HateoasLink]
+    ) -> dict[str, Any]:
+        return {
+            **data,
+            "_links": {name: link.to_dict() for name, link in links.items()},
+        }
+
+    def collection_response(
+        self,
+        items: list[dict],
+        resource_name: str,
+        page: int = 1,
+        per_page: int = 20,
+        total: int = 0,
+    ) -> dict[str, Any]:
+        total_pages = (total + per_page - 1) // per_page
+        base = f"{self.base_url}/{resource_name}"
+
+        links: dict[str, HateoasLink] = {
+            "self": HateoasLink(href=f"{base}?page={page}&per_page={per_page}"),
+            "create": HateoasLink(href=base, method="POST"),
+        }
+
+        if page > 1:
+            links["prev"] = HateoasLink(
+                href=f"{base}?page={page - 1}&per_page={per_page}"
+            )
+        if page < total_pages:
+            links["next"] = HateoasLink(
+                href=f"{base}?page={page + 1}&per_page={per_page}"
+            )
+
+        return {
+            "data": items,
+            "meta": {"page": page, "per_page": per_page, "total": total},
+            "_links": {k: v.to_dict() for k, v in links.items()},
+        }
+```
+
+### 6.2 Örnek HATEOAS Yanıtları
+
+**Tek Kaynak — `GET /api/v1/users/6789`**
+```json
+{
+  "data": {
+    "id": "6789",
+    "email": "boran@example.com",
+    "full_name": "Boran Yılmaz",
+    "created_at": "2026-02-25T10:00:00Z"
+  },
+  "_links": {
+    "self":     { "href": "/api/v1/users/6789", "method": "GET" },
+    "update":   { "href": "/api/v1/users/6789", "method": "PUT" },
+    "delete":   { "href": "/api/v1/users/6789", "method": "DELETE" },
+    "products": { "href": "/api/v1/users/6789/products", "method": "GET" },
+    "collection": { "href": "/api/v1/users", "method": "GET" }
+  }
+}
+```
+
+**Koleksiyon — `GET /api/v1/products?page=2&per_page=10`**
+```json
+{
+  "data": [
+    {
+      "id": "p101",
+      "name": "Laptop",
+      "price": 29999.99,
+      "_links": {
+        "self":   { "href": "/api/v1/products/p101", "method": "GET" },
+        "update": { "href": "/api/v1/products/p101", "method": "PUT" },
+        "owner":  { "href": "/api/v1/users/6789", "method": "GET" }
+      }
+    }
+  ],
+  "meta": { "page": 2, "per_page": 10, "total": 45 },
+  "_links": {
+    "self":   { "href": "/api/v1/products?page=2&per_page=10", "method": "GET" },
+    "prev":   { "href": "/api/v1/products?page=1&per_page=10", "method": "GET" },
+    "next":   { "href": "/api/v1/products?page=3&per_page=10", "method": "GET" },
+    "create": { "href": "/api/v1/products", "method": "POST" }
+  }
+}
+```
+
+**Hata Yanıtı — `GET /api/v1/users/9999`**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "RESOURCE_NOT_FOUND",
+    "detail": "User bulunamadı: 9999"
+  },
+  "_links": {
+    "self":  { "href": "/api/v1/users/9999", "method": "GET" },
+    "collection": { "href": "/api/v1/users", "method": "GET" },
+    "docs":  { "href": "/docs" }
+  }
+}
+```
+
+---
+
+## 7. OOP / SOLID Prensipleri ve Katmanlaşma
+
+### 7.1 Mimari Katmanlar
+
+```mermaid
+graph TD
+    subgraph PRESENTATION["📡 Sunum Katmanı (Controller)"]
+        CTRL["UserController<br/>FastAPI Router"]
+    end
+    subgraph BUSINESS["⚙️ İş Mantığı Katmanı (Service)"]
+        SVC["UserService<br/>İş Kuralları"]
+    end
+    subgraph DATA["💾 Veri Erişim Katmanı (Repository)"]
+        REPO["UserRepository<br/>MongoDB CRUD"]
+    end
+    subgraph DOMAIN["📦 Domain Katmanı (Models)"]
+        MODEL["User<br/>Pydantic Model"]
+    end
+
+    CTRL -->|"DTO/Schema"| SVC
+    SVC -->|"Domain Model"| REPO
+    REPO -->|"Document"| MODEL
+
+    style PRESENTATION fill:#e94560,stroke:#fff,color:#fff
+    style BUSINESS fill:#0984e3,stroke:#fff,color:#fff
+    style DATA fill:#00b894,stroke:#fff,color:#fff
+    style DOMAIN fill:#6c5ce7,stroke:#fff,color:#fff
+```
+
+### 7.2 SOLID Implementation
+
+```python
+# ─── S: Single Responsibility ──────────────────────────
+# Her sınıf tek bir sorumluluğa sahip
+
+# ─── O: Open/Closed ── I: Interface Segregation ────────
+# ─── D: Dependency Inversion ───────────────────────────
+
+from abc import ABC, abstractmethod
+from typing import TypeVar, Generic
+from pydantic import BaseModel
+
+T = TypeVar("T", bound=BaseModel)
+
+
+# ── Abstract Repository (Dependency Inversion + Open/Closed) ──
+class AbstractRepository(ABC, Generic[T]):
+    """Soyut Repository — tüm veri erişim sınıflarının arayüzü.
+    
+    SOLID:
+      - D (Dependency Inversion): Service katmanı bu arayüze bağımlıdır,
+        somut MongoDB implementasyonuna değil.
+      - O (Open/Closed): Yeni bir DB (PostgreSQL vb.) eklemek için
+        mevcut kodu değiştirmeden yeni bir sınıf türetmek yeterli.
+      - I (Interface Segregation): Yalnızca CRUD operasyonları tanımlı.
+    """
+
+    @abstractmethod
+    async def find_by_id(self, id: str) -> T | None: ...
+
+    @abstractmethod
+    async def find_all(self, skip: int = 0, limit: int = 20) -> list[T]: ...
+
+    @abstractmethod
+    async def create(self, entity: T) -> T: ...
+
+    @abstractmethod
+    async def update(self, id: str, entity: T) -> T | None: ...
+
+    @abstractmethod
+    async def delete(self, id: str) -> bool: ...
+
+
+# ── Abstract Service ──
+class AbstractService(ABC, Generic[T]):
+    """Soyut Service — iş mantığı katmanı arayüzü."""
+
+    def __init__(self, repository: AbstractRepository[T]):
+        self._repository = repository  # Dependency Injection
+
+    @abstractmethod
+    async def get_by_id(self, id: str) -> T: ...
+
+    @abstractmethod
+    async def get_all(self, page: int, per_page: int) -> tuple[list[T], int]: ...
+
+
+# ── Concrete MongoDB Repository ──
+from motor.motor_asyncio import AsyncIOMotorCollection
+
+
+class MongoRepository(AbstractRepository[T]):
+    """MongoDB implementasyonu.
+    
+    SOLID:
+      - L (Liskov Substitution): AbstractRepository yerine kullanılabilir.
+      - S (Single Responsibility): Yalnızca MongoDB CRUD sorumlu.
+    """
+
+    def __init__(self, collection: AsyncIOMotorCollection, model_class: type[T]):
+        self._collection = collection
+        self._model_class = model_class
+
+    async def find_by_id(self, id: str) -> T | None:
+        doc = await self._collection.find_one({"_id": id})
+        return self._model_class(**doc) if doc else None
+
+    async def find_all(self, skip: int = 0, limit: int = 20) -> list[T]:
+        cursor = self._collection.find().skip(skip).limit(limit)
+        return [self._model_class(**doc) async for doc in cursor]
+
+    async def create(self, entity: T) -> T:
+        doc = entity.model_dump(by_alias=True)
+        await self._collection.insert_one(doc)
+        return entity
+
+    async def update(self, id: str, entity: T) -> T | None:
+        result = await self._collection.update_one(
+            {"_id": id}, {"$set": entity.model_dump(exclude={"id"}, by_alias=True)}
+        )
+        return entity if result.modified_count else None
+
+    async def delete(self, id: str) -> bool:
+        result = await self._collection.delete_one({"_id": id})
+        return result.deleted_count > 0
+
+
+# ── Concrete User Service ──
+from shared.exceptions import NotFoundException
+
+
+class UserService(AbstractService["User"]):
+    """Kullanıcı iş mantığı.
+    
+    SOLID:
+      - S: Yalnızca kullanıcı iş kuralları.
+      - D: AbstractRepository'ye bağımlı, MongoDB'ye değil.
+    """
+
+    async def get_by_id(self, id: str) -> "User":
+        user = await self._repository.find_by_id(id)
+        if not user:
+            raise NotFoundException("User", id)
+        return user
+
+    async def get_all(self, page: int = 1, per_page: int = 20) -> tuple[list["User"], int]:
+        skip = (page - 1) * per_page
+        users = await self._repository.find_all(skip=skip, limit=per_page)
+        # Total count for pagination
+        total = await self._repository._collection.count_documents({})
+        return users, total
+
+
+# ── Controller (FastAPI Router) ──
+from fastapi import APIRouter, Depends
+
+router = APIRouter(prefix="/users", tags=["Users"])
+
+
+@router.get("/{user_id}")
+async def get_user(user_id: str, service: UserService = Depends(get_user_service)):
+    user = await service.get_by_id(user_id)
+    return HateoasBuilder("/api/v1").build_response(
+        data=user.model_dump(),
+        links={
+            "self":   HateoasLink(href=f"/api/v1/users/{user_id}"),
+            "update": HateoasLink(href=f"/api/v1/users/{user_id}", method="PUT"),
+            "delete": HateoasLink(href=f"/api/v1/users/{user_id}", method="DELETE"),
+        },
+    )
+```
+
+---
+
+## 8. Dispatcher (API Gateway) Detaylı Tasarımı
+
+### 8.1 Redis Tabanlı Merkezi Auth Middleware
+
+```python
+# dispatcher/app/middleware/auth_middleware.py
+import redis.asyncio as redis
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+
+# Public rotalar — auth gerektirmeyen
+PUBLIC_PATHS = {
+    "/api/v1/auth/login",
+    "/api/v1/auth/register",
+    "/health",
+    "/docs",
+    "/openapi.json",
+    "/metrics",
+}
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """Redis tabanlı merkezi yetkilendirme middleware'i."""
+
+    def __init__(self, app, redis_client: redis.Redis):
+        super().__init__(app)
+        self.redis = redis_client
+
+    async def dispatch(self, request: Request, call_next):
+        # Public path kontrolü
+        if request.url.path in PUBLIC_PATHS:
+            return await call_next(request)
+
+        # Token çıkarma
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "success": False,
+                    "error": {"code": "MISSING_TOKEN", "detail": "Authorization header gerekli"},
+                    "_links": {"login": {"href": "/api/v1/auth/login", "method": "POST"}},
+                },
+            )
+
+        token = auth_header.removeprefix("Bearer ").strip()
+
+        # Redis'ten token doğrulama
+        user_id = await self.redis.get(f"session:{token}")
+        if not user_id:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "success": False,
+                    "error": {"code": "INVALID_TOKEN", "detail": "Geçersiz veya süresi dolmuş token"},
+                    "_links": {"login": {"href": "/api/v1/auth/login", "method": "POST"}},
+                },
+            )
+
+        # User ID'yi downstream servislere ilet
+        request.state.user_id = user_id.decode()
+        return await call_next(request)
+```
+
+### 8.2 Servis Proxy / Yönlendirme
+
+```python
+# dispatcher/app/routes/proxy.py
+import httpx
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from app.services.service_registry import ServiceRegistry
+
+router = APIRouter()
+registry = ServiceRegistry()
+
+
+@router.api_route(
+    "/api/v1/{service_name}/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+)
+async def proxy_request(service_name: str, path: str, request: Request):
+    """Gelen istekleri uygun mikroservise yönlendirir."""
+    
+    target_url = registry.resolve(service_name, path)
+    if not target_url:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "success": False,
+                "error": {"code": "SERVICE_NOT_FOUND", "detail": f"Servis bulunamadı: {service_name}"},
+                "_links": {"docs": {"href": "/docs"}},
+            },
+        )
+
+    headers = dict(request.headers)
+    # İç ağ header'ları ekle
+    if hasattr(request.state, "user_id"):
+        headers["X-User-Id"] = request.state.user_id
+    headers["X-Forwarded-For"] = request.client.host
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                content=await request.body(),
+            )
+        return JSONResponse(
+            status_code=response.status_code,
+            content=response.json(),
+        )
+    except httpx.ConnectError:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "error": {"code": "SERVICE_UNAVAILABLE", "detail": f"{service_name} servisine erişilemiyor"},
+                "_links": {"health": {"href": "/health"}},
+            },
+        )
+```
+
+### 8.3 Service Registry
+
+```python
+# dispatcher/app/services/service_registry.py
+from app.config import settings
+
+
+class ServiceRegistry:
+    """Servis adını iç ağ URL'sine çözümler."""
+
+    def __init__(self):
+        self._services: dict[str, str] = {
+            "auth":     f"http://auth-service:{settings.AUTH_SERVICE_PORT}",
+            "users":    f"http://user-service:{settings.USER_SERVICE_PORT}",
+            "products": f"http://product-service:{settings.PRODUCT_SERVICE_PORT}",
+        }
+
+    def resolve(self, service_name: str, path: str) -> str | None:
+        base_url = self._services.get(service_name)
+        if not base_url:
+            return None
+        return f"{base_url}/{path}"
+
+    def list_services(self) -> list[dict[str, str]]:
+        return [
+            {"name": name, "url": url}
+            for name, url in self._services.items()
+        ]
+```
+
+---
+
+## 9. Docker Compose Tam Yapılandırma
+
+```yaml
+# docker-compose.yml
+version: "3.9"
+
+services:
+  # ── API Gateway ──
+  dispatcher:
+    build: ./dispatcher
+    container_name: dispatcher
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - AUTH_SERVICE_PORT=8001
+      - USER_SERVICE_PORT=8002
+      - PRODUCT_SERVICE_PORT=8003
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    networks:
+      - public_network
+      - gateway_network
+      - internal_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Redis (Auth Token Store) ──
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    networks:
+      - gateway_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+  # ── Auth Service ──
+  auth-service:
+    build: ./auth-service
+    container_name: auth-service
+    environment:
+      - MONGO_URL=mongodb://mongo-auth:27017/auth_db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      mongo-auth:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal_network
+      - gateway_network   # Redis erişimi için
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── User Service ──
+  user-service:
+    build: ./user-service
+    container_name: user-service
+    environment:
+      - MONGO_URL=mongodb://mongo-user:27017/user_db
+    depends_on:
+      mongo-user:
+        condition: service_healthy
+    networks:
+      - internal_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Product Service ──
+  product-service:
+    build: ./product-service
+    container_name: product-service
+    environment:
+      - MONGO_URL=mongodb://mongo-product:27017/product_db
+    depends_on:
+      mongo-product:
+        condition: service_healthy
+    networks:
+      - internal_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── MongoDB Instances ──
+  mongo-auth:
+    image: mongo:7
+    container_name: mongo-auth
+    networks:
+      - internal_network
+    volumes:
+      - mongo_auth_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo-user:
+    image: mongo:7
+    container_name: mongo-user
+    networks:
+      - internal_network
+    volumes:
+      - mongo_user_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo-product:
+    image: mongo:7
+    container_name: mongo-product
+    networks:
+      - internal_network
+    volumes:
+      - mongo_product_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ── Volumes ──
+volumes:
+  redis_data:
+  mongo_auth_data:
+  mongo_user_data:
+  mongo_product_data:
+
+# ── Networks ──
+networks:
+  public_network:
+    driver: bridge
+  gateway_network:
+    driver: bridge
+  internal_network:
+    driver: bridge
+    internal: true
+```
+
+### Monitoring Stack (Ayrı Compose Dosyası)
+
+```yaml
+# docker-compose.monitoring.yml
+version: "3.9"
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - public_network
+      - internal_network
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/dispatcher-dashboard.json
+    volumes:
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - public_network
+
+volumes:
+  prometheus_data:
+  grafana_data:
+```
+
+### Prometheus Konfigürasyonu
+
+```yaml
+# monitoring/prometheus/prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "dispatcher"
+    static_configs:
+      - targets: ["dispatcher:8000"]
+    metrics_path: /metrics
+
+  - job_name: "auth-service"
+    static_configs:
+      - targets: ["auth-service:8001"]
+    metrics_path: /metrics
+
+  - job_name: "user-service"
+    static_configs:
+      - targets: ["user-service:8002"]
+    metrics_path: /metrics
+
+  - job_name: "product-service"
+    static_configs:
+      - targets: ["product-service:8003"]
+    metrics_path: /metrics
+```
+
+---
+
+## 10. Yük Testi Altyapısı
+
+### Locust Senaryosu
+
+```python
+# load-tests/locustfile.py
+from locust import HttpUser, task, between, SequentialTaskSet
+
+
+class AuthenticatedUser(SequentialTaskSet):
+    """Gerçekçi kullanıcı senaryosu: login → CRUD işlemleri."""
+
+    token: str = ""
+
+    def on_start(self):
+        """Her kullanıcı oturumu login ile başlar."""
+        resp = self.client.post("/api/v1/auth/login", json={
+            "email": "loadtest@example.com",
+            "password": "LoadTest123!",
+        })
+        if resp.status_code == 200:
+            self.token = resp.json()["data"]["token"]
+
+    @task(3)
+    def get_profile(self):
+        self.client.get(
+            "/api/v1/users/me",
+            headers={"Authorization": f"Bearer {self.token}"},
+            name="/api/v1/users/me",
+        )
+
+    @task(2)
+    def list_products(self):
+        self.client.get(
+            "/api/v1/products?page=1&per_page=10",
+            headers={"Authorization": f"Bearer {self.token}"},
+            name="/api/v1/products",
+        )
+
+    @task(1)
+    def create_product(self):
+        self.client.post(
+            "/api/v1/products",
+            json={"name": "Test Ürün", "price": 99.99, "category": "Elektronik"},
+            headers={"Authorization": f"Bearer {self.token}"},
+            name="/api/v1/products [POST]",
+        )
+
+
+class WebsiteUser(HttpUser):
+    tasks = [AuthenticatedUser]
+    wait_time = between(1, 3)
+    host = "http://localhost:8000"
+```
+
+### k6 Senaryosu
+
+```javascript
+// load-tests/k6/load_test.js
+import http from "k6/http";
+import { check, sleep } from "k6";
+import { Rate, Trend } from "k6/metrics";
+
+const errorRate = new Rate("errors");
+const loginDuration = new Trend("login_duration");
+
+export const options = {
+  stages: [
+    { duration: "30s", target: 10 },   // Ramp-up
+    { duration: "1m",  target: 50 },   // Orta yük
+    { duration: "30s", target: 100 },  // Yüksek yük
+    { duration: "1m",  target: 100 },  // Sabit yüksek yük
+    { duration: "30s", target: 0 },    // Ramp-down
+  ],
+  thresholds: {
+    http_req_duration: ["p(95)<500"],   // %95'i 500ms altında
+    errors: ["rate<0.1"],               // Hata oranı <%10
+  },
+};
+
+const BASE_URL = "http://localhost:8000/api/v1";
+
+export default function () {
+  // Login
+  const loginRes = http.post(`${BASE_URL}/auth/login`, JSON.stringify({
+    email: "loadtest@example.com",
+    password: "LoadTest123!",
+  }), { headers: { "Content-Type": "application/json" } });
+
+  loginDuration.add(loginRes.timings.duration);
+
+  check(loginRes, {
+    "login status 200": (r) => r.status === 200,
+    "has token": (r) => r.json("data.token") !== undefined,
+  }) || errorRate.add(1);
+
+  const token = loginRes.json("data.token");
+  const authHeaders = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+
+  // Get profile
+  const profileRes = http.get(`${BASE_URL}/users/me`, { headers: authHeaders });
+  check(profileRes, {
+    "profile status 200": (r) => r.status === 200,
+    "has _links (HATEOAS)": (r) => r.json("_links") !== undefined,
+  });
+
+  sleep(1);
+
+  // List products
+  const productsRes = http.get(`${BASE_URL}/products?page=1`, { headers: authHeaders });
+  check(productsRes, {
+    "products status 200": (r) => r.status === 200,
+    "has pagination _links": (r) => r.json("_links.self") !== undefined,
+  });
+
+  sleep(1);
+}
+```
+
+---
+
+## 11. Grafana Metrik Mimarisi
+
+### Prometheus Metrikleri (Her Serviste)
+
+```python
+# shared/metrics.py
+from prometheus_client import Counter, Histogram, Info
+from prometheus_fastapi_instrumentator import Instrumentator
+
+# Özel metrikler
+REQUEST_COUNT = Counter(
+    "http_requests_total",
+    "Toplam HTTP istek sayısı",
+    ["method", "endpoint", "status_code", "service"],
+)
+
+REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "HTTP istek süresi (saniye)",
+    ["method", "endpoint", "service"],
+    buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+)
+
+SERVICE_INFO = Info("service", "Servis bilgisi")
+
+
+def setup_metrics(app, service_name: str):
+    """FastAPI uygulamasına Prometheus metrikleri ekler."""
+    SERVICE_INFO.info({"name": service_name, "version": "1.0.0"})
+    Instrumentator(
+        should_group_status_codes=False,
+        excluded_handlers=["/health", "/metrics"],
+    ).instrument(app).expose(app, endpoint="/metrics")
+```
+
+### Grafana Dashboard Panelleri
+
+| Panel | Metrik | Görselleştirme |
+|---|---|---|
+| İstek/saniye | `rate(http_requests_total[5m])` | Time series |
+| Gecikme (p95) | `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))` | Time series |
+| Hata oranı | `rate(http_requests_total{status_code=~"5.."}[5m]) / rate(http_requests_total[5m])` | Gauge |
+| Servis sağlığı | `up{job=~".*-service"}` | Stat panel |
+| Aktif bağlantılar | `http_requests_in_progress` | Gauge |
+
+---
+
+## 12. Geliştirme Yol Haritası
+
+| Faz | Süre | Çıktı |
+|---|---|---|
+| **Faz 1**: Altyapı | 1 hafta | Docker Compose, ağ izolasyonu, CI/CD |
+| **Faz 2**: Auth Service + Dispatcher | 1 hafta | Login/Register, Redis token, TDD |
+| **Faz 3**: User Service | 1 hafta | CRUD + HATEOAS, bağımsız MongoDB |
+| **Faz 4**: Product Service | 1 hafta | CRUD + HATEOAS, servisler arası link |
+| **Faz 5**: Monitoring | 3 gün | Prometheus + Grafana dashboard |
+| **Faz 6**: Yük Testi & Dokümantasyon | 3 gün | Locust/k6 + Rapor |
+
+---
+
+## Verification Plan
+
+### Otomatik Testler
+
+Tüm servisler için çalıştırılacak komutlar:
+
+```bash
+# Her servisin kendi dizininde birim testleri çalıştır
+cd dispatcher && pytest tests/ -v --cov=app --cov-report=term-missing
+cd auth-service && pytest tests/ -v --cov=app --cov-report=term-missing
+cd user-service && pytest tests/ -v --cov=app --cov-report=term-missing
+cd product-service && pytest tests/ -v --cov=app --cov-report=term-missing
+
+# Tüm sistemi Docker ile ayağa kaldır
+docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up --build -d
+
+# Ağ izolasyonunu doğrula (dışarıdan iç servislere erişilemediğini kontrol et)
+curl -f http://localhost:8001/health  # Bu BAŞARISIZ olmalı
+curl -f http://localhost:8000/health  # Bu BAŞARILI olmalı
+
+# Yük testi çalıştır
+cd load-tests && locust --headless -u 50 -r 10 --run-time 2m --host http://localhost:8000
+```
+
+### Manuel Doğrulama
+
+1. **Postman ile HATEOAS Testi**: Login → `_links` içindeki URL'leri takip ederek tüm API'yi keşfetme
+2. **Grafana Dashboard**: `http://localhost:3000` üzerinden metriklerin gerçek zamanlı izlenmesi
+3. **Docker Network Testi**: `docker exec` ile iç ağ konteynerlerinden dış ağa erişilemediğinin doğrulanması
