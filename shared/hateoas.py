@@ -2,7 +2,7 @@
 
 from typing import Any
 
-class HateosLink:
+class HateoasLink:
     """ Tek bir HATEOAS linkini temsil eder """
 
     def __init__(self, href: str, method: str ="GET", rel: str | None = None):
@@ -14,7 +14,7 @@ class HateosLink:
         result = {"href": self.href, "method": self.method}
         if self.rel:
             result["rel"] = self.rel
-            return result
+        return result
 
 class HateoasBuilder:
     """ HATEOAS ile uyumlu response oluştur """
