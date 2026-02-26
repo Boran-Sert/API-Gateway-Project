@@ -1,3 +1,6 @@
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
 """Sistem hata yönetim merkezi """
 
 class AppException(Exception):
@@ -51,3 +54,22 @@ class ServiceUnavailableException(AppException):
             detail=f"{service_name} servisine şu an ulaşılamıyor. Lütfen daha sonra tekrar deneyin.",
             error_code="SERVICE_UNAVAILABLE"
         )
+
+async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+    """ FastAPI exception handler - HATEOAS uyumlu hata yanıtı """
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": {
+                "code": exc.error_code,
+                "detail": exc.detail,
+            },
+            "_links": {
+                "self": {"href": str(request.url), "method": request.method},
+                "docs": {"href": "/docs"},
+            },
+        },
+        
+    )
+
