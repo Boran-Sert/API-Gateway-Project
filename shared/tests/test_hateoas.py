@@ -1,4 +1,4 @@
-""" shared/tests/test_hateoas.py - HATEOAS Link Builder Testleri """
+""" HATEOAS Link Builder Testleri """
 
 from shared.hateoas import HateoasLink, HateoasBuilder
 
