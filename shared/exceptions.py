@@ -46,6 +46,16 @@ class ConflictException(AppException):
         )
 
 
+class ValidationException(AppException):
+    """Gelen verinin doğrulama kurallarına uymaması durumunda 422 döner."""
+    def __init__(self, detail: str):
+        super().__init__(
+            status_code=422,
+            detail=detail,
+            error_code="VALIDATION_ERROR"
+        )
+
+
 class ServiceUnavailableException(AppException):
     """Dispatcher'ın hedef mikroservise bağlanamadığı durumda 503 döner."""
     def __init__(self, service_name: str):

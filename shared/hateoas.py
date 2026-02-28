@@ -19,7 +19,7 @@ class HateoasLink:
 class HateoasBuilder:
     """ HATEOAS ile uyumlu response oluştur """
 
-    def __init__(self, href: str, base_url: str = "/api/v1"):
+    def __init__(self, base_url: str = "/api/v1"):
         self.base_url = base_url
     
     def build_response(self, data: dict[str, Any], links: dict[str, HateoasLink]) -> dict [str, Any]:

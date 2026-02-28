@@ -28,7 +28,7 @@ def mock_collection():
     return collection
 
 @pytest.fixture
-def repo(mock_colleciton):
+def repo(mock_collection):
     """ Test için MongoRepository örneği """
     return MongoRepository(collection=mock_collection, model_class=FakeUser)
 
