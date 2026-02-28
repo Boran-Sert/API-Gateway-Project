@@ -1,4 +1,4 @@
-""" shared/tests/test_exceptions.py - Hata Yönetimi Testleri """
+"""  Hata Yönetimi Testleri """
 
 from shared.exceptions import (
     AppException, 
