@@ -14,7 +14,7 @@ class AbstractService(ABC ,Generic[T]):
 
         self._repository = repository
     
-    @abstarctmethod
+    @abstractmethod
     async def get_all(self, page: int, per_page: int) -> tuple[list[T], int]:
         """ Kayıtları sayfalı şekilde döndür (items, total) olarak döner """
         ...
