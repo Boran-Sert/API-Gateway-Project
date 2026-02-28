@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from shared.metrics import setup_metrics, REQUEST_COUNT, REQUEST_LATENCY
 
-
 def test_request_count_metric_exists():
     """REQUEST_COUNT metriği oluşturulmuş olmalı."""
     assert REQUEST_COUNT is not None
