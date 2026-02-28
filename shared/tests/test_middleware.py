@@ -20,10 +20,10 @@ def client(app_with_middleware):
     """ Test istemcisi """
     return TestClient(app_with_middleware)
 
-    def test_reponse_contains_x_time_header(client):
-        """ Yanıtta X- response - time olmalı """
-        reponse = client.get("/test")
-        assert "X-Response-Time" in reponse.headers
+def test_reponse_contains_x_time_header(client):
+    """ Yanıtta X- response - time olmalı """
+    reponse = client.get("/test")
+    assert "X-Response-Time" in reponse.headers
 
 def test_x_response_time_format_is_milliseconds(client):
     """X-Response-Time değeri 'ms' ile bitmeli."""
