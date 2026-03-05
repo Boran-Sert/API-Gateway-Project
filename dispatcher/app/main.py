@@ -10,7 +10,7 @@ app = FastAPI(title = "API Gateaway (Dispatcher)")
 
 SERVICES = {
     "auth": os.getenv("AUTH_SERVICE_URL", "http://auth-service:8001"), 
-    "user": os.getenv("USER_SERVICE_URL", "http://user-service:8002"),
+    "users": os.getenv("USER_SERVICE_URL", "http://user-service:8002"),
     "products": os.getenv("PRODUCT_SERVICE_URL","http://product-service:8003")
 }
 
@@ -19,16 +19,15 @@ async def health_check():
     """ Gateway çalışıyor mu kontrol eder """
     return {"status": "ok", "service": "dispatcher"}
 
-@app.api_route("/api/{service_name}/{path:path}", methods=["GET","POST","PULL","DELETE"])
-async def route_request():
+@app.api_route("/api/{service_name}/{path:path}", methods=["GET","POST","PUT","DELETE"])
+async def route_request(service_name: str, path: str, request: Request):
     """ Gelen istekleri yönlendirir """
-    if service_name not in SERVICE:
+    if service_name not in SERVICES:
         # Eğer olmayan servis isternirse 404 döner
-        raise
-    HTTPException(status_code = 404, detail= "Servis bulunamadı")
+        raise HTTPException(status_code = 404, detail= "Servis bulunamadı")
 
     # Hedef URL oluştur
-    target_url = f"{SERVICE[service_name]/{path}}"
+    target_url = f"{SERVICES[service_name]}/{path}"
 
     # HTTP isteği ile trafik oluştur
     async with httpx.AsyncClient() as client:
@@ -42,6 +41,11 @@ async def route_request():
             url = target_url,
             headers = dict(request.headers),
             content = body,
-            params = request_query_params
+            params = request.query_params
         )
 
+        return JSONResponse(
+            content=response.json() if response.content else None,
+            status_code=response.status_code,
+            headers=dict(response.headers)
+        )
