@@ -1,0 +1,47 @@
+""" Sistemin Ana uygulaması """
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
+import httpx
+import os
+
+app = FastAPI(title = "API Gateaway (Dispatcher)")
+
+# Servis URL leri dockerdan veya ortam değişkenleriden alınıyor
+
+SERVICES = {
+    "auth": os.getenv("AUTH_SERVICE_URL", "http://auth-service:8001"), 
+    "user": os.getenv("USER_SERVICE_URL", "http://user-service:8002"),
+    "products": os.getenv("PRODUCT_SERVICE_URL","http://product-service:8003")
+}
+
+@app.get("/health")
+async def health_check():
+    """ Gateway çalışıyor mu kontrol eder """
+    return {"status": "ok", "service": "dispatcher"}
+
+@app.api_route("/api/{service_name}/{path:path}", methods=["GET","POST","PULL","DELETE"])
+async def route_request():
+    """ Gelen istekleri yönlendirir """
+    if service_name not in SERVICE:
+        # Eğer olmayan servis isternirse 404 döner
+        raise
+    HTTPException(status_code = 404, detail= "Servis bulunamadı")
+
+    # Hedef URL oluştur
+    target_url = f"{SERVICE[service_name]/{path}}"
+
+    # HTTP isteği ile trafik oluştur
+    async with httpx.AsyncClient() as client:
+
+        # Gelen body oku
+        body = await request.body()
+
+        # İstek hedef servise iletirilir
+        response = await client.request(
+            method = request.method,
+            url = target_url,
+            headers = dict(request.headers),
+            content = body,
+            params = request_query_params
+        )
+
