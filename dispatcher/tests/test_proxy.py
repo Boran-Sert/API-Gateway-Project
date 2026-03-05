@@ -3,7 +3,7 @@
 from fastapi.testclient import TestClient
 from dispatcher.app.main import app 
 from unittest.mock import patch, AsyncMock
-from httpx import Response
+from httpx import Response, Request
 
 client = TestClient(app)
 
@@ -13,7 +13,6 @@ def test_dispatcher_health_returns_200():
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "dispatcher"}
 
-
 @patch("httpx.AsyncClient.request", new_callable=AsyncMock)
 def test_dispatcher_routes_request_to_user_service(mock_request):
     """/api/users isteği user-service'e yönlendirilmeli."""
@@ -21,7 +20,8 @@ def test_dispatcher_routes_request_to_user_service(mock_request):
     # Hedef servisin döneceği sahte (mock)
     mock_request.return_value = Response(
         status_code=200, 
-        json={"data": "mocked users"}
+        json={"data": "mocked users"},
+        request=Request("GET", "http://user-service:8002/users")
     )
     
     # Gateway'e istek 
