@@ -27,7 +27,10 @@ async def route_request(service_name: str, path: str, request: Request):
         raise HTTPException(status_code = 404, detail= "Servis bulunamadı")
 
     # Hedef URL oluştur
-    target_url = f"{SERVICES[service_name]}/{path}"
+    # Hedef URL oluştur ('/api/users/profile' -> 'profile' path olur, '/api/users' için path boştur)
+    # Target URL'ye her zaman service_name (örn: /users) eklenir. Test: http://user-service:8002/users
+    target_url = f"{SERVICES[service_name]}/{service_name}/{path}" if path else f"{SERVICES[service_name]}/{service_name}"
+
 
     # HTTP isteği ile trafik oluştur
     async with httpx.AsyncClient() as client:
