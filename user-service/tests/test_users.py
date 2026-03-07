@@ -10,10 +10,10 @@ except ImportError:
 
 def test_get_empty_users_list():
     """
-    Kullanıcı listesini getiren GET /users endpoint'inin testi.
-    Sistemde hiç kullanıcı yokken boş bir liste ve HATEOAS linkleri dönmelidir.
+    Kullanici listesini getiren GET /users endpoint'inin testi.
+    Sistemde hiç kullanici yokken boş bir liste ve HATEOAS linkleri dönmelidir.
     """
-    assert client is not None, "Uygulama (app.main) henüz yazılmadı!"
+    assert client is not None, "Uygulama (app.main) henüz yok!"
     
     response = client.get("/users")
     
