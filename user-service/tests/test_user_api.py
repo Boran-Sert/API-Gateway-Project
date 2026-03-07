@@ -20,4 +20,4 @@ def test_get_users_returns_hateoas_format():
 
     # kendi kendine self linkine sahip olmalı
     assert "self" in json_data["_links"]
-    assert "json_data"["_links"]["self"]["href"] == "/users"
+    assert json_data["_links"]["self"]["href"] == "/users"
