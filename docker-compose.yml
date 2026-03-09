@@ -1,1 +1,51 @@
+version: '3.8'
 
+services:
+  # ==========================================
+  # 1. USER SERVICE VE İZOLE VERİTABANI
+  # ==========================================
+  mongo-user:
+    image: mongo:7.0
+    container_name: mongo-user
+    restart: always
+    ports:
+      - "27017:27017" # Geliştirme aşamasında DB'yi görebilmek için
+    volumes:
+      - mongo_user_data:/data/db
+
+  user-service:
+    build: ./user-service
+    container_name: user-service
+    ports:
+      - "8002:8002"
+    environment:
+      - MONGO_URL=mongodb://mongo-user:27017
+    depends_on:
+      - mongo-user
+
+  # ==========================================
+  # 2. PRODUCT SERVICE VE İZOLE VERİTABANI
+  # ==========================================
+  mongo-product:
+    image: mongo:7.0
+    container_name: mongo-product
+    restart: always
+    ports:
+      - "27018:27017" # Çakışmaması için 27018 portuna yönlendirdik
+    volumes:
+      - mongo_product_data:/data/db
+
+  product-service:
+    build: ./product-service
+    container_name: product-service
+    ports:
+      - "8003:8003"
+    environment:
+      - MONGO_URL=mongodb://mongo-product:27017
+    depends_on:
+      - mongo-product
+
+# Verilerin konteyner silinse bile kaybolmaması için kalıcı birimler
+volumes:
+  mongo_user_data:
+  mongo_product_data:
