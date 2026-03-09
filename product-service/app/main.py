@@ -1,4 +1,4 @@
-from fastapi import FastAPI, status, Depends
+from fastapi import FastAPI, status, Depends, HTTPException
 from pydantic import BaseModel
 from app.repository import ProductRepository
 
@@ -10,7 +10,6 @@ class ProductCreate(BaseModel):
     category: str
     stock: int
 
-# Dependency Injection (Repository sınıfımızı enjekte ediyoruz)
 def get_repository():
     return ProductRepository()
 
@@ -29,6 +28,21 @@ async def create_product(product: ProductCreate, repo: ProductRepository = Depen
         "data": new_product,
         "_links": {
             "self": {"href": f"/products/{new_product['id']}", "method": "GET"},
+            "collection": {"href": "/products", "method": "GET"}
+        }
+    }
+
+# SİLME ENDPOINT'İ
+@app.delete("/products/{product_id}")
+async def delete_product(product_id: str, repo: ProductRepository = Depends(get_repository)):
+    is_deleted = await repo.delete_product(product_id)
+    if not is_deleted:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    
+    return {
+        "success": True,
+        "message": "Ürün başarıyla silindi",
+        "_links": {
             "collection": {"href": "/products", "method": "GET"}
         }
     }

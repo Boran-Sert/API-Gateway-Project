@@ -4,7 +4,7 @@ import uuid
 
 client = TestClient(app)
 
-# --- SAHTE REPOSITORY ---
+# --- SAHTE (MOCK) REPOSITORY ---
 class MockProductRepository:
     def __init__(self):
         self.fake_db = []
@@ -16,8 +16,15 @@ class MockProductRepository:
         product_data["id"] = str(uuid.uuid4())
         self.fake_db.append(product_data)
         return product_data
+        
+    async def delete_product(self, product_id: str):
+        initial_length = len(self.fake_db)
+        self.fake_db = [p for p in self.fake_db if p.get("id") != product_id]
+        return len(self.fake_db) < initial_length
 
-app.dependency_overrides[get_repository] = lambda: MockProductRepository()
+# KRİTİK DÜZELTME: Sınıfı bir kez oluşturup, FastAPI'nin hep bu aynı belleği kullanmasını sağlıyoruz
+mock_repo_instance = MockProductRepository()
+app.dependency_overrides[get_repository] = lambda: mock_repo_instance
 
 # --- TESTLER ---
 def test_get_empty_products_list():
@@ -45,10 +52,6 @@ def test_create_product():
     assert "self" in json_data["_links"]
 
 def test_delete_product():
-    """
-    Ürün silme testi (DELETE /products/{id}).
-    Uygun HTTP metodu (DELETE) ve RMM standartları test edilir.
-    """
     # 1. Silmek için bir ürün oluştur
     new_product = {
         "name": "Silinecek Mouse",
@@ -61,16 +64,13 @@ def test_delete_product():
     
     product_id = create_response.json()["data"]["id"]
     
-    # 2. Henüz yazmadığımız DELETE endpoint'ine istek at
+    # 2. Ürünü sil
     delete_response = client.delete(f"/products/{product_id}")
     
-    # 3. Beklenen durum 200 OK
+    # 3. Başarı durumunu kontrol et
     assert delete_response.status_code == 200
-    
     json_data = delete_response.json()
     assert json_data["success"] == True
-    
-    # HATEOAS kontrolü
     assert "_links" in json_data
     assert "collection" in json_data["_links"]
     assert json_data["_links"]["collection"]["href"] == "/products"

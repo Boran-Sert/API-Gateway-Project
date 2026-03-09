@@ -2,7 +2,7 @@ from app.database import db
 import uuid
 
 class ProductRepository:
-    """Ürünler için veritabani işlemlerini yöneten OOP sinifi """
+    """Ürünler için veritabani işlemlerini yöneten OOP """
     
     def __init__(self):
         self.collection = db.get_collection("products")
@@ -20,3 +20,8 @@ class ProductRepository:
         await self.collection.insert_one(product_data)
         product_data["id"] = product_data.pop("_id")
         return product_data
+
+    # SİLME FONKSİYONU
+    async def delete_product(self, product_id: str) -> bool:
+        result = await self.collection.delete_one({"_id": product_id})
+        return result.deleted_count > 0
