@@ -1,4 +1,4 @@
-""" Porxy Testleri """
+""" Proxy Testleri """
 
 from fastapi.testclient import TestClient
 from dispatcher.app.main import app 
@@ -36,3 +36,29 @@ def test_dispatcher_routes_request_to_user_service(mock_request):
     mock_request.assert_called_once()
     args, kwargs = mock_request.call_args
     assert kwargs["url"] == "http://user-service:8002/users"
+
+
+# --- YENİ EKLENEN TEST (Hizalaması düzeltildi) ---
+
+@patch("httpx.AsyncClient.request", new_callable=AsyncMock)
+def test_dispatcher_routes_request_to_product_service(mock_request):
+    """/api/products isteği product-service'e yönlendirilmeli."""
+    
+    # 1. Hedef ürün servisinin döneceği sahte (mock) yanıtı hazırlıyoruz
+    mock_request.return_value = Response(
+        status_code=200, 
+        json={"data": [{"id": "1", "name": "Test Ürünü", "price": 100}]},
+        request=Request("GET", "http://product-service:8003/products")
+    )
+    
+    # 2. Dışarıdaki bir kullanıcı gibi Gateway'e (Dispatcher) istek atıyoruz
+    response = client.get("/api/products")
+    
+    # 3. Kontroller (Assertions)
+    assert response.status_code == 200
+    assert response.json() == {"data": [{"id": "1", "name": "Test Ürünü", "price": 100}]}
+    
+    # 4. Gateway arka planda gerçekten product-service'in 8003 portuna gitmiş mi?
+    mock_request.assert_called_once()
+    args, kwargs = mock_request.call_args
+    assert kwargs["url"] == "http://product-service:8003/products"
