@@ -1,0 +1,42 @@
+name: Python CI (Microservices Tests)
+
+on:
+  push:
+    branches: [ "dev", "main" ]
+  pull_request:
+    branches: [ "dev", "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r product-service/requirements.txt
+        pip install -r dispatcher/requirements.txt
+        pip install pytest httpx fastapi motor uvicorn
+
+    - name: Run Product Service Tests
+      run: |
+        cd product-service
+        python -m pytest tests/
+
+    - name: Run Dispatcher Routing Tests
+      run: |
+        cd dispatcher
+        python -m pytest tests/
