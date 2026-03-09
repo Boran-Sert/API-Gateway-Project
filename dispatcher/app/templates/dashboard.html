@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>🚀 API Gateway Traffic Monitor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .status-2xx { color: #28a745; font-weight: bold; }
+        .status-4xx { color: #dc3545; font-weight: bold; }
+        .status-5xx { color: #6f42c1; font-weight: bold; }
+        .table-container { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body class="container py-5">
+    <h1 class="mb-4">🚀 API Gateway Traffic Monitor</h1>
+    
+    <div class="mb-4 d-flex gap-2">
+        <button onclick="filterLogs('all')" class="btn btn-outline-secondary btn-sm">Tüm Kayıtlar</button>
+        <button onclick="filterLogs('2xx')" class="btn btn-outline-success btn-sm">Sadece Başarılı (2xx)</button>
+        <button onclick="filterLogs('error')" class="btn btn-outline-danger btn-sm">Sadece Hatalar (4xx/5xx)</button>
+    </div>
+
+    <div class="table-container">
+        <table class="table table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Zaman</th>
+                    <th>Hedef Servis</th>
+                    <th>Metot</th>
+                    <th>Durum Kodu</th>
+                    <th>Yol</th>
+                </tr>
+            </thead>
+            <tbody id="logTableBody">
+                {% for log in logs %}
+                <tr class="log-row" data-status="{{ log.status_code }}">
+                    <td>{{ log.timestamp }}</td>
+                    <td><span class="badge bg-info text-dark">{{ log.service }}</span></td>
+                    <td><code>{{ log.method }}</code></td>
+                    <td class="status-cell status-{{ log.status_code // 100 }}xx">{{ log.status_code }}</td>
+                    <td>{{ log.path }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        function filterLogs(type) {
+            const rows = document.querySelectorAll(".log-row");
+            rows.forEach(row => {
+                const status = parseInt(row.getAttribute("data-status"));
+                if (type === 'error') {
+                    row.style.display = (status >= 400) ? "" : "none";
+                } else if (type === '2xx') {
+                    row.style.display = (status >= 200 && status < 300) ? "" : "none";
+                } else {
+                    row.style.display = "";
+                }
+            });
+        }
+    </script>
+</body>
+</html>
