@@ -4,7 +4,7 @@ import uuid
 
 client = TestClient(app)
 
-# --- SAHTE (MOCK) REPOSITORY ---
+# --- SAHTE REPOSITORY ---
 class MockProductRepository:
     def __init__(self):
         self.fake_db = []
@@ -17,7 +17,6 @@ class MockProductRepository:
         self.fake_db.append(product_data)
         return product_data
 
-# FastAPI'ye gerçek veritabanı yerine sahtesini kullanmasını söylüyoruz
 app.dependency_overrides[get_repository] = lambda: MockProductRepository()
 
 # --- TESTLER ---
@@ -44,3 +43,34 @@ def test_create_product():
     assert "id" in json_data["data"]
     assert "_links" in json_data
     assert "self" in json_data["_links"]
+
+def test_delete_product():
+    """
+    Ürün silme testi (DELETE /products/{id}).
+    Uygun HTTP metodu (DELETE) ve RMM standartları test edilir.
+    """
+    # 1. Silmek için bir ürün oluştur
+    new_product = {
+        "name": "Silinecek Mouse",
+        "price": 300.00,
+        "category": "Elektronik",
+        "stock": 15
+    }
+    create_response = client.post("/products", json=new_product)
+    assert create_response.status_code == 201
+    
+    product_id = create_response.json()["data"]["id"]
+    
+    # 2. Henüz yazmadığımız DELETE endpoint'ine istek at
+    delete_response = client.delete(f"/products/{product_id}")
+    
+    # 3. Beklenen durum 200 OK
+    assert delete_response.status_code == 200
+    
+    json_data = delete_response.json()
+    assert json_data["success"] == True
+    
+    # HATEOAS kontrolü
+    assert "_links" in json_data
+    assert "collection" in json_data["_links"]
+    assert json_data["_links"]["collection"]["href"] == "/products"
