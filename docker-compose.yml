@@ -1,51 +1,58 @@
-version: '3.8'
+
 
 services:
-  # ==========================================
-  # 1. USER SERVICE VE İZOLE VERİTABANI
-  # ==========================================
-  mongo-user:
-    image: mongo:7.0
-    container_name: mongo-user
-    restart: always
+  # --- DISPATCHER (GATEWAY) BÖLÜMÜ ---
+  dispatcher:
+    build: ./dispatcher
     ports:
-      - "27017:27017" # Geliştirme aşamasında DB'yi görebilmek için
-    volumes:
-      - mongo_user_data:/data/db
-
-  user-service:
-    build: ./user-service
-    container_name: user-service
-    ports:
-      - "8002:8002"
+      - "8000:8000"
     environment:
-      - MONGO_URL=mongodb://mongo-user:27017
+      - MONGO_URL=mongodb://mongo-dispatcher:27017
+      - USER_SERVICE_URL=http://user-service:8002
+      - PRODUCT_SERVICE_URL=http://product-service:8003
     depends_on:
-      - mongo-user
+      - mongo-dispatcher
+    networks:
+      - micro-network
 
-  # ==========================================
-  # 2. PRODUCT SERVICE VE İZOLE VERİTABANI
-  # ==========================================
-  mongo-product:
-    image: mongo:7.0
-    container_name: mongo-product
-    restart: always
-    ports:
-      - "27018:27017" # Çakışmaması için 27018 portuna yönlendirdik
-    volumes:
-      - mongo_product_data:/data/db
+  # Dispatcher'ın İzole Veritabanı (Zorunluluk!)
+  mongo-dispatcher:
+    image: mongo:latest
+    networks:
+      - micro-network
+    # Port dışarı açılmıyor -> Network Isolation
 
+  # --- PRODUCT SERVICE BÖLÜMÜ ---
   product-service:
     build: ./product-service
-    container_name: product-service
-    ports:
-      - "8003:8003"
     environment:
       - MONGO_URL=mongodb://mongo-product:27017
     depends_on:
       - mongo-product
+    networks:
+      - micro-network
+    # Dışarı port açmıyoruz, sadece Dispatcher erişebilir
 
-# Verilerin konteyner silinse bile kaybolmaması için kalıcı birimler
-volumes:
-  mongo_user_data:
-  mongo_product_data:
+  mongo-product:
+    image: mongo:latest
+    networks:
+      - micro-network
+
+  # --- USER SERVICE BÖLÜMÜ ---
+  user-service:
+    build: ./user-service
+    environment:
+      - MONGO_URL=mongodb://mongo-user:27017
+    depends_on:
+      - mongo-user
+    networks:
+      - micro-network
+
+  mongo-user:
+    image: mongo:latest
+    networks:
+      - micro-network
+
+networks:
+  micro-network:
+    driver: bridge
