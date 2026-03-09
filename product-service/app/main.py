@@ -46,3 +46,17 @@ async def delete_product(product_id: str, repo: ProductRepository = Depends(get_
             "collection": {"href": "/products", "method": "GET"}
         }
     }
+
+@app.put("/products/{product_id}")
+async def update_product(product_id: str, product: ProductCreate, repo: ProductRepository = Depends(get_repository)):
+    updated_product = await repo.update_product(product_id, product.model_dump())
+    if not updated_product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    
+    return {
+        "data": updated_product,
+        "_links": {
+            "self": {"href": f"/products/{product_id}", "method": "GET"},
+            "collection": {"href": "/products", "method": "GET"}
+        }
+    }
