@@ -31,3 +31,28 @@ def test_get_empty_users_list():
     assert "_links" in json_data
     assert "self" in json_data["_links"]
     assert json_data["_links"]["self"]["href"] == "/users"
+
+def test_create_users():
+    """
+    Yeni bir kullanıcı oluşturma POST /users endpoint'inin testi.
+    """
+    assert client is not None, "Uygulama (app.main) henüz yok!"
+
+    new_user_data = {
+        "username": "testuser",
+        "email": "test@example.com",
+        "is_active": True
+    }
+    response = client.post("/users", json= new_user_data)
+
+    # 1. Başarılı HTTP Kodunu Kontrol Et (Genellikle 201 Created döndürülür)
+    assert response.status_code == 201
+
+    json_data = response.json()
+
+    # 2. Gelen yanıtı kontrol et
+    assert "data" in json_data
+    assert json_data["data"]["username"] == "testuser"
+    assert json_data["data"]["email"] == "test@example.com"
+    assert "id" in json_data["data"]
+    assert "_links" in json_data
