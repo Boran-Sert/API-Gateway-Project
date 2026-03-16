@@ -4,8 +4,15 @@ from fastapi.testclient import TestClient
 from dispatcher.app.main import app 
 from unittest.mock import patch, AsyncMock
 from httpx import Response, Request
+import pytest
+from unittest.mock import patch, AsyncMock
 
 client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def disable_traffic_logging():
+    with patch("dispatcher.app.main.log_traffic", new_callable=AsyncMock):
+        yield
 
 def test_dispatcher_health_returns_200():
     """ /health endpoint 200 döndürmeli sistem ayakta """
@@ -38,7 +45,6 @@ def test_dispatcher_routes_request_to_user_service(mock_request):
     assert kwargs["url"] == "http://user-service:8002/users"
 
 
-# --- YENİ EKLENEN TEST (Hizalaması düzeltildi) ---
 
 @patch("httpx.AsyncClient.request", new_callable=AsyncMock)
 def test_dispatcher_routes_request_to_product_service(mock_request):

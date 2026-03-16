@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from shared.exceptions import AppException, app_exception_handler
 from shared.middleware import RequestLoggingMiddleware
 from shared.metrics import setup_metrics
+from app.api.router import router 
 
 app = FastAPI(title="Auth Service", version="1.0.0")
 
@@ -14,4 +15,4 @@ setup_metrics(app, service_name="auth-service")
 async def health_check():
     return {"status": "ok", "service": "auth-service"}
 
-# Buraya Controller/Router'lar gelecek
+app.include_router(router)    

@@ -1,5 +1,3 @@
-
-
 services:
   # --- DISPATCHER (GATEWAY) BÖLÜMÜ ---
   dispatcher:
@@ -22,7 +20,7 @@ services:
       - micro-network
     # Port dışarı açılmıyor -> Network Isolation
 
-  # --- PRODUCT SERVICE BÖLÜMÜ ---
+    # --- PRODUCT SERVICE BÖLÜMÜ ---
   product-service:
     build: ./product-service
     environment:
@@ -50,6 +48,14 @@ services:
 
   mongo-user:
     image: mongo:latest
+    networks:
+      - micro-network
+
+  # --- AUTH SERVICE BÖLÜMÜ ---
+  mongo-auth:
+    image: mongo:latest
+    ports:
+      - "27018:27017"
     networks:
       - micro-network
 
