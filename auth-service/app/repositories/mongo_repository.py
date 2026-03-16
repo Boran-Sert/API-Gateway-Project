@@ -3,7 +3,7 @@ from shared.base_repository import MongoRepository
 from app.models.auth import UserCredential
 
 class MongoUserRepository(MongoRepository[UserCredential]):
-    """Kimlik doğrulama işlemleri için MongoDB repository implementasyonu."""
+    """Kimlik doğrulama işlemleri için MongoDB repository """
     
     def __init__(self, collection: AsyncIOMotorCollection):
         super().__init__(collection, UserCredential)
