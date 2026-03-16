@@ -15,3 +15,8 @@ class RegisterRequest(BaseModel):
     """Kayıt isteği şeması."""
     email: EmailStr
     password: str
+
+class UserResponse(BaseModel):
+    """Başarılı işlem sonrası dönülecek kullanıcı bilgisi."""
+    id: str = Field(alias="_id")
+    email: EmailStr
