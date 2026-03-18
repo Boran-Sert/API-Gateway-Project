@@ -66,7 +66,7 @@ class AuthService:
         # 3. JWT üğret
         payload ={
             "sub": user.email,
-            "exp": datetime.datetime.utcnow + datetime.timedelta(hours=1)
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours = 1)
         }
         token = jwt.encode(payload, self.SECRET_KEY, algorithm="HS256")
         return {"token": token}
