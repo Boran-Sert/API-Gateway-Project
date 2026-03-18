@@ -15,4 +15,6 @@ setup_metrics(app, service_name="auth-service")
 async def health_check():
     return {"status": "ok", "service": "auth-service"}
 
-app.include_router(router)    
+app.include_router(router)
+
+
