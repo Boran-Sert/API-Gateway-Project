@@ -5,8 +5,11 @@ from app.models.auth import RegisterRequest, LoginRequest, UserCredential, UserR
 from app.repositories.mongo_repository import MongoUserRepository
 from app.core.security import hash_password, verify_password
 from shared.exceptions import ConflictException, UnauthorizedException
+import jwt
+import datetime
 
 class AuthService:
+    SECRET_KEY = "22042507012004" 
     def __init__(self,repository: MongoUserRepository):
         self._repository = repository
 
@@ -60,5 +63,11 @@ class AuthService:
                 "Geçersiz şifre"
             )
 
-        # 3. Başarılı mesajı döndür
-        return {"message": "Giriş başarılı"}
+        # 3. JWT üğret
+        payload ={
+            "sub": user.email,
+            "exp": datetime.datetime.utcnow + datetime.timedelta(hours=1)
+        }
+        token = jwt.encode(payload, self.SECRET_KEY, algorithm="HS256")
+        return {"token": token}
+        
