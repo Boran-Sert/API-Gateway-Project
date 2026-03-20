@@ -45,3 +45,31 @@ async def test_login_returns_jwt_token(mock_verify, mock_hash):
     # 2 token decode edilmeli ve içinde doğru email olmalı
     decoded = jwt.decode(result["token"], options = {"verify_signature": False})
     assert decoded["sub"] == "test@example.com"
+
+
+@pytest.mark.asyncio
+@patch("app.services.auth_service.hash_password", return_value="fake_hashed_pw")
+@patch("app.services.auth_service.verify_password", return_value=True)
+async def test_login_saves_token_to_redis(mock_verify, mock_hash):
+    """ Token başarlı olduğunda REDİS'e kaydetmeli """
+    mock_repo = AsyncMock()
+    mock_redis = AsyncMock()
+
+    # Kullanıcı veritabanında varmış gibi davran
+    mock_repo.find_by_email.return_value = AsyncMock(
+        email = "test@example.com",
+        hashed_password = "fakepsw"
+    )
+
+    service = AuthService(repository = mock_repo, redis_client = mock_redis)
+    request = LoginRequest(email = "test@example.com", password = "pas123")
+    result = await service.login(request)
+
+    #1. Redis set
+    mock_redis.assert_called_once()
+
+    #2. Argüman kontrol
+    args, kwargs = mock_redis.set.call.args
+    assert args[0] == f"token:{result['token']}"
+    assert args[1] == "test@example.com"
+    assert kwargs["ex"] == 3600 
