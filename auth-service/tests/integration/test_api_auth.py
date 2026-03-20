@@ -70,4 +70,5 @@ def test_api_login_success():
     response = client.post("/auth/login", json={"email": "login_test@example.com", "password": "test"})
     
     assert response.status_code == status.HTTP_200_OK
-    assert response.json()["message"] == "Giriş başarılı"
+    response_data = response.json()
+    assert "token" in response_data
