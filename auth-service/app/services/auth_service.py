@@ -10,8 +10,9 @@ import datetime
 
 class AuthService:
     SECRET_KEY = "22042507012004" 
-    def __init__(self,repository: MongoUserRepository):
+    def __init__(self, repository: MongoUserRepository, redis_client=None):
         self._repository = repository
+        self._redis = redis_client
 
     async def register(self, request: RegisterRequest) -> UserResponse:
         """
@@ -69,5 +70,7 @@ class AuthService:
             "exp": datetime.datetime.utcnow() + datetime.timedelta(hours = 1)
         }
         token = jwt.encode(payload, self.SECRET_KEY, algorithm="HS256")
+        if self._redis:
+            await self._redis.set(f"token:{token}", user.email, ex=3600)
         return {"token": token}
         
