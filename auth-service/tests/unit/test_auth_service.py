@@ -66,10 +66,10 @@ async def test_login_saves_token_to_redis(mock_verify, mock_hash):
     result = await service.login(request)
 
     #1. Redis set
-    mock_redis.assert_called_once()
+    mock_redis.set.assert_called_once()
 
     #2. Argüman kontrol
-    args, kwargs = mock_redis.set.call.args
+    args, kwargs = mock_redis.set.call_args
     assert args[0] == f"token:{result['token']}"
     assert args[1] == "test@example.com"
     assert kwargs["ex"] == 3600 
