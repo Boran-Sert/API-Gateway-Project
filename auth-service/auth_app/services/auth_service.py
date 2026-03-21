@@ -1,9 +1,9 @@
 """ Auth Service """
 
 import uuid
-from app.models.auth import RegisterRequest, LoginRequest, UserCredential, UserResponse
-from app.repositories.mongo_repository import MongoUserRepository
-from app.core.security import hash_password, verify_password
+from auth_app.models.auth import RegisterRequest, LoginRequest, UserCredential, UserResponse
+from auth_app.repositories.mongo_repository import MongoUserRepository
+from auth_app.core.security import hash_password, verify_password
 from shared.exceptions import ConflictException, UnauthorizedException
 import jwt
 import datetime

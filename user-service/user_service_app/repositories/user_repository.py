@@ -1,5 +1,5 @@
 from shared.base_repository import MongoRepository
-from app.models.user import User
+from user_service_app.models.user import User
 
 class UserRepository(MongoRepository[User]):
     """

@@ -1,6 +1,6 @@
 from motor.motor_asyncio import AsyncIOMotorCollection
 from shared.base_repository import MongoRepository
-from app.models.auth import UserCredential
+from auth_app.models.auth import UserCredential
 
 class MongoUserRepository(MongoRepository[UserCredential]):
     """Kimlik doğrulama işlemleri için MongoDB repository """

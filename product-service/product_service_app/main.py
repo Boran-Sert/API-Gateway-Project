@@ -1,9 +1,11 @@
-from fastapi import FastAPI, status, Depends, HTTPException, Query
+from fastapi import FastAPI, status, Depends, Query
 from pydantic import BaseModel
-from app.repository import ProductRepository
+from product_service_app.repository import ProductRepository
+from shared.exceptions import NotFoundException, AppException, app_exception_handler
 
 
 app = FastAPI(title="Product Service", version="1.0.0")
+app.add_exception_handler(AppException, app_exception_handler)
 
 class ProductCreate(BaseModel):
     name: str
@@ -14,13 +16,6 @@ class ProductCreate(BaseModel):
 def get_repository():
     return ProductRepository()
 
-@app.get("/products")
-async def get_products(repo: ProductRepository = Depends(get_repository)):
-    products = await repo.get_all_products()
-    return {
-        "data": products,
-        "_links": {"self": {"href": "/products", "method": "GET"}}
-    }
 
 @app.post("/products", status_code=status.HTTP_201_CREATED)
 async def create_product(product: ProductCreate, repo: ProductRepository = Depends(get_repository)):
@@ -38,7 +33,7 @@ async def create_product(product: ProductCreate, repo: ProductRepository = Depen
 async def delete_product(product_id: str, repo: ProductRepository = Depends(get_repository)):
     is_deleted = await repo.delete_product(product_id)
     if not is_deleted:
-        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+        raise NotFoundException("Product", product_id)
     
     return {
         "success": True,
@@ -48,9 +43,6 @@ async def delete_product(product_id: str, repo: ProductRepository = Depends(get_
         }
     }
 
-
-
-# ... (Mevcut sınıflar ve get_repository aynı kalıyor)
 
 @app.get("/products")
 async def get_products(
@@ -82,4 +74,18 @@ async def get_products(
             "limit": limit
         },
         "_links": links
+    }
+
+@app.put("/products/{product_id}")
+async def update_product(product_id: str, product: ProductCreate, repo: ProductRepository = Depends(get_repository)):
+    updated = await repo.update_product(product_id, product.model_dump())
+    if not updated:
+        raise NotFoundException("Product", product_id)
+    
+    return {
+        "data": updated,
+        "_links": {
+            "self": {"href": f"/products/{product_id}", "method": "GET"},
+            "collection": {"href": "/products", "method": "GET"}
+        }
     }

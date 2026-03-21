@@ -1,6 +1,6 @@
 from shared.base_service import AbstractService
 from shared.base_repository import AbstractRepository
-from app.models.user import User
+from user_service_app.models.user import User
 
 class UserService(AbstractService[User]):
     """

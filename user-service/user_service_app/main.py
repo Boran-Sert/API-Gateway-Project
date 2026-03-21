@@ -7,9 +7,9 @@ from shared.middleware import RequestLoggingMiddleware
 from shared.metrics import setup_metrics
 from shared.hateoas import HateoasBuilder
 
-from app.models.user import User
-from app.repositories.user_repository import UserRepository
-from app.services.user_service import UserService
+from user_service_app.models.user import User
+from user_service_app.repositories.user_repository import UserRepository
+from user_service_app.services.user_service import UserService
 
 app = FastAPI(title="User Service", version="1.0.0")
 

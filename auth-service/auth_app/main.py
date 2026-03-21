@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from shared.exceptions import AppException, app_exception_handler
 from shared.middleware import RequestLoggingMiddleware
 from shared.metrics import setup_metrics
-from app.api.router import router 
+from auth_app.api.router import router 
 
 app = FastAPI(title="Auth Service", version="1.0.0")
 

@@ -1,7 +1,7 @@
 """ Proxy Testleri """
 
 from fastapi.testclient import TestClient
-from dispatcher.app.main import app 
+from dispatcher_app.main import app 
 from unittest.mock import patch, AsyncMock
 from httpx import Response, Request
 import pytest
@@ -11,7 +11,7 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def disable_traffic_logging():
-    with patch("dispatcher.app.main.log_traffic", new_callable=AsyncMock):
+    with patch("dispatcher_app.main.log_traffic", new_callable=AsyncMock):
         yield
 
 def test_dispatcher_health_returns_200():

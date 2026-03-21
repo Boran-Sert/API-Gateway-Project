@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from app.main import app, get_repository
+from product_service_app.main import app, get_repository
 import uuid
 
 client = TestClient(app)
@@ -28,6 +28,11 @@ class MockProductRepository:
                 p.update(update_data)
                 return p
         return None
+
+    async def get_paginated_products(self, page: int, limit: int):
+        start = (page - 1) * limit
+        end = start + limit
+        return self.fake_db[start:end], len(self.fake_db)
 
 mock_repo_instance = MockProductRepository()
 app.dependency_overrides[get_repository] = lambda: mock_repo_instance

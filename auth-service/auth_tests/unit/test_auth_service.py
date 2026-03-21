@@ -2,14 +2,13 @@
 
 import pytest
 from unittest.mock import AsyncMock, patch
-from app.services.auth_service import AuthService
-from app.models.auth import RegisterRequest, LoginRequest
+from auth_app.services.auth_service import AuthService
+from auth_app.models.auth import RegisterRequest, LoginRequest
 import jwt
-import datetime
 
 
 @pytest.mark.asyncio
-@patch("app.services.auth_service.hash_password", return_value="fake_hashed_pw")
+@patch("auth_app.services.auth_service.hash_password", return_value="fake_hashed_pw")
 async def test_register_user_success(mock_hash):
     mock_repo = AsyncMock()
     mock_repo.find_by_email.return_value = None
@@ -24,8 +23,8 @@ async def test_register_user_success(mock_hash):
     mock_hash.assert_called_once_with("password123")
 
 @pytest.mark.asyncio
-@patch("app.services.auth_service.hash_password", return_value="fake_hashed_pw")
-@patch("app.services.auth_service.verify_password", return_value=True)
+@patch("auth_app.services.auth_service.hash_password", return_value="fake_hashed_pw")
+@patch("auth_app.services.auth_service.verify_password", return_value=True)
 async def test_login_returns_jwt_token(mock_verify, mock_hash):
     """ Login başarlı olduğunda token dönmeli """
     mock_repo = AsyncMock()
@@ -48,8 +47,8 @@ async def test_login_returns_jwt_token(mock_verify, mock_hash):
 
 
 @pytest.mark.asyncio
-@patch("app.services.auth_service.hash_password", return_value="fake_hashed_pw")
-@patch("app.services.auth_service.verify_password", return_value=True)
+@patch("auth_app.services.auth_service.hash_password", return_value="fake_hashed_pw")
+@patch("auth_app.services.auth_service.verify_password", return_value=True)
 async def test_login_saves_token_to_redis(mock_verify, mock_hash):
     """ Token başarlı olduğunda REDİS'e kaydetmeli """
     mock_repo = AsyncMock()

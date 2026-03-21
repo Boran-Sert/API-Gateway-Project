@@ -1,4 +1,4 @@
-from app.database import db
+from product_service_app.database import db
 import uuid
 
 class ProductRepository:

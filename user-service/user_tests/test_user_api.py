@@ -2,8 +2,8 @@
 
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock
-from app.main import app, get_user_service
-from app.services.user_service import UserService
+from user_service_app.main import app, get_user_service
+from user_service_app.services.user_service import UserService
 
 client = TestClient(app)
 

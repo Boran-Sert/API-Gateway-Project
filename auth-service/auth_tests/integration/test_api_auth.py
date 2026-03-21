@@ -1,10 +1,10 @@
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
-from app.main import app
-from app.api.router import get_auth_service
-from app.services.auth_service import AuthService
-from app.models.auth import UserCredential
+from auth_app.main import app
+from auth_app.api.router import get_auth_service
+from auth_app.services.auth_service import AuthService
+from auth_app.models.auth import UserCredential
 
 # 1. SAHTE (MOCK) REPOSITORY
 # product-service'de kullandığın yapıya benzer, tamamen hafızada çalışır.
