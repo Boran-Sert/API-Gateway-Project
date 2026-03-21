@@ -32,7 +32,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [product-service, user-service, auth-service, dispatcher]
+        include:
+          - service: product-service
+            test_dir: product_tests
+          - service: user-service
+            test_dir: user_tests
+          - service: auth-service
+            test_dir: auth_tests
+          - service: dispatcher
+            test_dir: dispatcher_tests
 
     steps:
     - uses: actions/checkout@v4
@@ -47,4 +55,4 @@ jobs:
         pip install -r ${{ matrix.service }}/requirements.txt
     - name: Run ${{ matrix.service }} Tests
       working-directory: ${{ matrix.service }}
-      run: python -m pytest tests/ -v --tb=short
+      run: python -m pytest ${{ matrix.test_dir }}/ -v --tb=short
