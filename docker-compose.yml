@@ -62,3 +62,48 @@ services:
 networks:
   micro-network:
     driver: bridge
+
+services:
+  # --- YENİ: REDIS KATMANI  ---
+  redis:
+    image: redis:alpine
+    container_name: redis-cache
+    # Portu dışarı açmaya gerek yok, sadece iç ağda çalışsın
+    networks:
+      - micro-network
+
+  # --- DISPATCHER GÜNCELLEMESİ ---
+  dispatcher:
+    build: ./dispatcher
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URL=mongodb://mongo-dispatcher:27017
+      - USER_SERVICE_URL=http://user-service:8002
+      - PRODUCT_SERVICE_URL=http://product-service:8003
+      # Redis bağlantı bilgileri eklendi
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - mongo-dispatcher
+      - redis # Redis ayağa kalkmadan Dispatcher başlamasın
+    networks:
+      - micro-network
+
+  # ... (Diğer servislerin (mongo-dispatcher, product-service vb.) aynı kalıyor) ...
+
+  # --- AUTH SERVICE İÇİN GÜNCELLEME ---
+  # Auth-service de Redis'e erişip token yazabilmeli
+  auth-service:
+    build: ./auth-service
+    environment:
+      - MONGO_URL=mongodb://mongo-auth:27017
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - mongo-auth
+      - redis
+    networks:
+      - micro-network
+
+# ... (Networks kısmı aynı kalıyor) ...
