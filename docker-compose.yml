@@ -1,101 +1,47 @@
 services:
-  # --- DISPATCHER (GATEWAY) BÖLÜMÜ ---
+  # --- 1. GATEWAY & MONITORING (DIŞA AÇIK KATMAN) ---
   dispatcher:
     build: ./dispatcher
+    container_name: api-gateway
     ports:
       - "8000:8000"
     environment:
       - MONGO_URL=mongodb://mongo-dispatcher:27017
+      - AUTH_SERVICE_URL=http://auth-service:8001
       - USER_SERVICE_URL=http://user-service:8002
       - PRODUCT_SERVICE_URL=http://product-service:8003
-    depends_on:
-      - mongo-dispatcher
-    networks:
-      - micro-network
-
-  # Dispatcher'ın İzole Veritabanı (Zorunluluk!)
-  mongo-dispatcher:
-    image: mongo:latest
-    networks:
-      - micro-network
-    # Port dışarı açılmıyor -> Network Isolation
-
-    # --- PRODUCT SERVICE BÖLÜMÜ ---
-  product-service:
-    build: ./product-service
-    environment:
-      - MONGO_URL=mongodb://mongo-product:27017
-    depends_on:
-      - mongo-product
-    networks:
-      - micro-network
-    # Dışarı port açmıyoruz, sadece Dispatcher erişebilir
-
-  mongo-product:
-    image: mongo:latest
-    networks:
-      - micro-network
-
-  # --- USER SERVICE BÖLÜMÜ ---
-  user-service:
-    build: ./user-service
-    environment:
-      - MONGO_URL=mongodb://mongo-user:27017
-    depends_on:
-      - mongo-user
-    networks:
-      - micro-network
-
-  mongo-user:
-    image: mongo:latest
-    networks:
-      - micro-network
-
-  # --- AUTH SERVICE BÖLÜMÜ ---
-  mongo-auth:
-    image: mongo:latest
-    ports:
-      - "27018:27017"
-    networks:
-      - micro-network
-
-networks:
-  micro-network:
-    driver: bridge
-
-services:
-  # --- YENİ: REDIS KATMANI  ---
-  redis:
-    image: redis:alpine
-    container_name: redis-cache
-    # Portu dışarı açmaya gerek yok, sadece iç ağda çalışsın
-    networks:
-      - micro-network
-
-  # --- DISPATCHER GÜNCELLEMESİ ---
-  dispatcher:
-    build: ./dispatcher
-    ports:
-      - "8000:8000"
-    environment:
-      - MONGO_URL=mongodb://mongo-dispatcher:27017
-      - USER_SERVICE_URL=http://user-service:8002
-      - PRODUCT_SERVICE_URL=http://product-service:8003
-      # Redis bağlantı bilgileri eklendi
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     depends_on:
       - mongo-dispatcher
-      - redis # Redis ayağa kalkmadan Dispatcher başlamasın
+      - redis
     networks:
       - micro-network
 
-  # ... (Diğer servislerin (mongo-dispatcher, product-service vb.) aynı kalıyor) ...
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - micro-network
 
-  # --- AUTH SERVICE İÇİN GÜNCELLEME ---
-  # Auth-service de Redis'e erişip token yazabilmeli
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - micro-network
+    depends_on:
+      - prometheus
+
+  # --- 2. AUTH & SESSION (GÜVENLİK KATMANI) ---
   auth-service:
     build: ./auth-service
+    container_name: auth-service
     environment:
       - MONGO_URL=mongodb://mongo-auth:27017
       - REDIS_HOST=redis
@@ -106,4 +52,54 @@ services:
     networks:
       - micro-network
 
-# ... (Networks kısmı aynı kalıyor) ...
+  redis:
+    image: redis:alpine
+    container_name: redis-cache
+    networks:
+      - micro-network
+
+  # --- 3. BUSINESS LOGIC (MİKROSERVİS KATMANI) ---
+  product-service:
+    build: ./product-service
+    container_name: product-service
+    environment:
+      - MONGO_URL=mongodb://mongo-product:27017
+    depends_on:
+      - mongo-product
+    networks:
+      - micro-network
+
+  user-service:
+    build: ./user-service
+    container_name: user-service
+    environment:
+      - MONGO_URL=mongodb://mongo-user:27017
+    depends_on:
+      - mongo-user
+    networks:
+      - micro-network
+
+  # --- 4. DATA PERSISTENCE (VERİTABANI KATMANI - İZOLE) ---
+  mongo-dispatcher:
+    image: mongo:latest
+    networks:
+      - micro-network
+
+  mongo-product:
+    image: mongo:latest
+    networks:
+      - micro-network
+
+  mongo-user:
+    image: mongo:latest
+    networks:
+      - micro-network
+
+  mongo-auth:
+    image: mongo:latest
+    networks:
+      - micro-network
+
+networks:
+  micro-network:
+    driver: bridge
