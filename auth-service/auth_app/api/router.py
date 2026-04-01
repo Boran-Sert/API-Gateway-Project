@@ -1,5 +1,5 @@
 """ Kimlik doğrulama işlemlerinin HTTP arayüzleri  """
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Request
 from auth_app.models.auth import RegisterRequest, LoginRequest, UserResponse
 from auth_app.services.auth_service import AuthService
 from auth_app.repositories.mongo_repository import MongoUserRepository
@@ -24,9 +24,6 @@ async def register(request: RegisterRequest, service: AuthService = Depends(get_
         user = await service.register(request)
         return user
 @router.post("/login")
-async def login(request: LoginRequest, service: AuthService = Depends(get_auth_service)):
-        """
-        Kullanıcı girişi.
-        """
-        result = await service.login(request) 
-        return result
+async def login(request: LoginRequest, req: Request):
+    auth_service = req.app.state.auth_service
+    return await auth_service.login(request)

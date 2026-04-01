@@ -7,7 +7,7 @@ app = FastAPI(title="Product Service", version="1.0.0")
 def get_product_service():
     return ProductService()
 
-@app.get("/products")
+@app.get("/products", include_in_schema=True)
 async def get_products(
     page: int = Query(1, ge=1), 
     limit: int = Query(5, ge=1, le=100),
@@ -21,3 +21,22 @@ async def get_products(
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "product-service"}
+
+
+from pydantic import BaseModel
+
+# Ürün şeması (RequestBody için)
+class ProductCreate(BaseModel):
+    name: str
+    price: float
+    description: str
+
+@app.post("/products") # POST isteğini karşılayan kapı
+async def create_product(
+    product: ProductCreate, 
+    service: ProductService = Depends(get_product_service)
+):
+    """
+    Yeni bir ürün oluşturur.
+    """
+    return await service.create_product(product)

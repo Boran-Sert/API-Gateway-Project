@@ -13,3 +13,10 @@ class ProductService:
             links.append({"rel": "next", "href": f"/api/products?page={page+1}&limit={limit}"})
         
         return {"data": products, "total": total, "_links": links}
+    
+    # product_service_app/services/product_service.py içindeki sınıfa ekle
+async def create_product(self, product_data: ProductCreate):
+    # Veriyi dict'e çevirip MongoDB'ye kaydet
+    new_product = product_data.dict()
+    result = await self._repository.create(new_product)
+    return {"message": "Ürün başarıyla eklendi", "id": str(result.inserted_id)}

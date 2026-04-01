@@ -1,5 +1,7 @@
+version: '3.8'
+
 services:
-  # --- 1. GATEWAY & MONITORING (DIŞA AÇIK KATMAN) ---
+  # --- 1. GATEWAY & MONITORING ---
   dispatcher:
     build: ./dispatcher
     container_name: api-gateway
@@ -10,7 +12,7 @@ services:
       - AUTH_SERVICE_URL=http://auth-service:8001
       - USER_SERVICE_URL=http://user-service:8002
       - PRODUCT_SERVICE_URL=http://product-service:8003
-      - REDIS_HOST=redis
+      - REDIS_HOST=redis-cache  # Container name ile aynı olmalı
       - REDIS_PORT=6379
     depends_on:
       - mongo-dispatcher
@@ -38,13 +40,15 @@ services:
     depends_on:
       - prometheus
 
-  # --- 2. AUTH & SESSION (GÜVENLİK KATMANI) ---
+  # --- 2. AUTH & SESSION ---
   auth-service:
-    build: ./auth-service
+    build:
+      context: ./auth-service # Context'i direkt klasöre verdik
+      dockerfile: Dockerfile
     container_name: auth-service
     environment:
       - MONGO_URL=mongodb://mongo-auth:27017
-      - REDIS_HOST=redis
+      - REDIS_HOST=redis-cache
       - REDIS_PORT=6379
     depends_on:
       - mongo-auth
@@ -58,7 +62,7 @@ services:
     networks:
       - micro-network
 
-  # --- 3. BUSINESS LOGIC (MİKROSERVİS KATMANI) ---
+  # --- 3. BUSINESS LOGIC ---
   product-service:
     build: ./product-service
     container_name: product-service
@@ -79,27 +83,37 @@ services:
     networks:
       - micro-network
 
-  # --- 4. DATA PERSISTENCE (VERİTABANI KATMANI - İZOLE) ---
+  # --- 4. DATA PERSISTENCE ---
   mongo-dispatcher:
     image: mongo:latest
+    container_name: mongo-dispatcher
     networks:
       - micro-network
 
   mongo-product:
     image: mongo:latest
+    container_name: mongo-product
     networks:
       - micro-network
 
   mongo-user:
     image: mongo:latest
+    container_name: mongo-user
     networks:
       - micro-network
 
   mongo-auth:
     image: mongo:latest
+    container_name: mongo-auth
+    volumes:
+      - mongo_auth_data:/data/db
     networks:
       - micro-network
 
 networks:
   micro-network:
     driver: bridge
+
+volumes:
+  mongo_auth_data:
+  mongo_product_data:

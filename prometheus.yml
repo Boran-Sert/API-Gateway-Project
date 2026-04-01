@@ -1,14 +1,11 @@
 global:
-  scrape_interval: 15s  # 15 saniyede bir veri topla
-  evaluation_interval: 15s
+  scrape_interval: 15s
 
 scrape_configs:
-  # Dispatcher üzerindeki metrikleri toplar
   - job_name: 'api-gateway'
     static_configs:
-      - targets: ['dispatcher:8000']
+      - targets: ['api-gateway:8000']
 
-  # Kendi metriklerini toplar
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
