@@ -12,6 +12,7 @@ def get_database() -> AsyncIOMotorClient:
     """Veritabanı bağlantısını döndürür."""
     return client[DB_NAME]
 
+
 @asynccontextmanager
 async def lifespan(app):
     """Uygulama yaşam döngüsü boyunca veritabanı bağlantısını yönetir."""
