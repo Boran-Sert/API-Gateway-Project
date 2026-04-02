@@ -1,14 +1,19 @@
 FROM python:3.11-slim
 
+# Python'ın /app dizinindeki modülleri (örn: shared) bulabilmesi için
+ENV PYTHONPATH=/app
+
 WORKDIR /app
 
-# 1. requirements.txt dosyasını ana dizinden auth-service içine bakarak kopyala
+# 1. Bağımlılıkları kopyala ve kur (önbellekleme için ayrı katman)
 COPY auth-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 2. Ortak 'shared' kütüphanesini kopyala
 COPY shared /app/shared
 
-COPY auth-service /app
+# 3. auth-service uygulamasının kaynak kodlarını kopyala
+COPY auth-service/. /app/
 
 EXPOSE 8001
 

@@ -1,15 +1,20 @@
-# 1. Python imajını kullan
 FROM python:3.11-slim
 
-# 2. Çalışma dizinini ayarla
+# Python'ın /app dizinindeki modülleri (örn: shared) bulabilmesi için
+ENV PYTHONPATH=/app
+
 WORKDIR /app
 
-# 3. Bağımlılıkları kopyala ve yükle
-COPY requirements.txt .
+# 1. Bağımlılıkları kopyala ve kur (önbellekleme için ayrı katman)
+COPY user-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Tüm kodları kopyala
-COPY . .
+# 2. Ortak 'shared' kütüphanesini kopyala
+COPY shared /app/shared
 
-# 5. Uygulamayı başlat (Boran'ın portu 8002'ydi)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002"]
+# 3. user-service uygulamasının kaynak kodlarını kopyala
+COPY user-service/. /app/
+
+EXPOSE 8002
+
+CMD ["uvicorn", "user_service_app.main:app", "--host", "0.0.0.0", "--port", "8002"]
