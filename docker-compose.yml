@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # --- 1. GATEWAY & MONITORING ---
   dispatcher:
     build:
       context: .
@@ -11,10 +10,10 @@ services:
       - "8000:8000"
     environment:
       - MONGO_URL=mongodb://mongo-dispatcher:27017
-      - AUTH_SERVICE_URL=http://auth-service:8001
+      - AUTH_SERVICE_URL=http://auth-service:8000
       - USER_SERVICE_URL=http://user-service:8002
       - PRODUCT_SERVICE_URL=http://product-service:8003
-      - REDIS_HOST=redis-cache  # Container name ile aynı olmalı
+      - REDIS_HOST=redis-cache
       - REDIS_PORT=6379
     depends_on:
       - mongo-dispatcher
@@ -42,7 +41,6 @@ services:
     depends_on:
       - prometheus
 
-  # --- 2. AUTH & SESSION ---
   auth-service:
     build:
       context: .
@@ -57,6 +55,8 @@ services:
       - redis
     networks:
       - micro-network
+    ports:
+      - "8001:8000"
 
   redis:
     image: redis:alpine
@@ -64,12 +64,13 @@ services:
     networks:
       - micro-network
 
-  # --- 3. BUSINESS LOGIC ---
   product-service:
     build:
       context: .
       dockerfile: product-service/Dockerfile
     container_name: product-service
+    ports:
+      - "8003:8003"
     environment:
       - MONGO_URL=mongodb://mongo-product:27017
     depends_on:
@@ -82,6 +83,8 @@ services:
       context: .
       dockerfile: user-service/Dockerfile
     container_name: user-service
+    ports:
+      - "8002:8002"
     environment:
       - MONGO_URL=mongodb://mongo-user:27017
     depends_on:
@@ -93,24 +96,36 @@ services:
   mongo-dispatcher:
     image: mongo:latest
     container_name: mongo-dispatcher
+    ports:
+      - "27020:27017" # Gateway DB
     networks:
       - micro-network
 
   mongo-product:
     image: mongo:latest
     container_name: mongo-product
+    ports:
+      - "27019:27017" # Ürünler DB
+    volumes:
+      - mongo_product_data:/data/db
     networks:
       - micro-network
 
   mongo-user:
     image: mongo:latest
     container_name: mongo-user
+    ports:
+      - "27018:27017" # Kullanıcılar DB
+    volumes:
+      - mongo_user_data:/data/db
     networks:
       - micro-network
 
   mongo-auth:
     image: mongo:latest
     container_name: mongo-auth
+    ports:
+      - "27017:27017" # Auth DB
     volumes:
       - mongo_auth_data:/data/db
     networks:
@@ -123,3 +138,4 @@ networks:
 volumes:
   mongo_auth_data:
   mongo_product_data:
+  mongo_user_data:
