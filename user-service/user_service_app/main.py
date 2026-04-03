@@ -1,51 +1,62 @@
-from fastapi import FastAPI, Depends, Request
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-
-from shared.exceptions import AppException, app_exception_handler
-from shared.middleware import RequestLoggingMiddleware
-from shared.metrics import setup_metrics
-from shared.hateoas import HateoasBuilder
-
-from user_service_app.models.user import User
-from user_service_app.repositories.user_repository import UserRepository
+from fastapi import FastAPI, Depends, Header
 from user_service_app.services.user_service import UserService
+from user_service_app.models.user import UserUpdate
+from user_service_app.db import lifespan
+from shared.exceptions import AppException, app_exception_handler
+from shared.logging import setup_logging
+from shared.middleware import LoggingMiddleware
+from shared.metrics import setup_metrics
 
-app = FastAPI(title="User Service", version="1.0.0")
+app = FastAPI(
+    title="User Service",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
-# Faz 1: Shared Library Entegrasyonu
+# Servise özel logger'ı başlat
+logger = setup_logging("user-service")
+
+# Hata yakalama mekanizmasını ekle
 app.add_exception_handler(AppException, app_exception_handler)
-app.add_middleware(RequestLoggingMiddleware)
-setup_metrics(app, service_name="user-service")
 
-# Veri tabanı bağlantısı
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://user-mongo:27017")
-client = AsyncIOMotorClient(MONGO_URL)
-db = client.user_db
-collection = db.users
+# Prometheus metriklerini ayarla
+setup_metrics(app, "user-service")
 
-# Dependency Injection (Bağımlılık Enjeksiyonu)
-def get_user_service() -> UserService:
-    repo = UserRepository(collection=collection, model_class=User)
-    return UserService(repository=repo)
+# Loglama middleware'ini logger ile birlikte ekle
+app.add_middleware(LoggingMiddleware, logger=logger)
 
+# Dependency Injection
+def get_user_service():
+    return UserService()
 
-@app.get("/users")
-async def get_users(request: Request, page: int = 1, per_page: int = 10, service: UserService = Depends(get_user_service)):
-    """
-    Kullanıcı listesini getirir (Faz 4 OOM Kurallarıyla).
-    """
-    users, total = await service.get_all(page, per_page)
-    
-    # HATEOAS Mimarisi (Faz 1 shared kütüphanesi kullanımı)
-    builder = HateoasBuilder(base_url="")
-    
-    serialized_users = [u.model_dump(by_alias=True) for u in users]
-    
-    return builder.collection_response(
-        items=serialized_users,
-        resource_name="users",
-        page=page,
-        per_page=per_page,
-        total=total
-    )
+# Header Dependencies
+async def get_user_id(x_user_id: str = Header(..., alias="X-User-ID")) -> str:
+    """Gateway'den gelen X-User-ID başlığını alır."""
+    return x_user_id
+
+async def get_user_email(x_user_email: str = Header(..., alias="X-User-Email")) -> str:
+    """Gateway'den gelen X-User-Email başlığını alır."""
+    return x_user_email
+
+@app.get("/users/me", summary="Kullanıcının kendi profilini getirir")
+async def get_my_profile(
+    user_id: str = Depends(get_user_id),
+    user_email: str = Depends(get_user_email),
+    service: UserService = Depends(get_user_service)
+):
+    """Giriş yapmış kullanıcının profil bilgilerini getirir."""
+    return await service.get_my_profile(user_id, user_email)
+
+@app.put("/users/me", summary="Kullanıcının kendi profilini günceller")
+async def update_my_profile(
+    user_data: UserUpdate,
+    user_id: str = Depends(get_user_id),
+    user_email: str = Depends(get_user_email),
+    service: UserService = Depends(get_user_service)
+):
+    """Giriş yapmış kullanıcının profil bilgilerini günceller."""
+    return await service.update_my_profile(user_id, user_email, user_data)
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "user-service"}

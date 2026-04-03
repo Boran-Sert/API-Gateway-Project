@@ -11,7 +11,7 @@ from shared.exceptions import (
 from shared.hateoas import HateoasLink, HateoasBuilder
 from shared.base_repository import AbstractRepository, MongoRepository
 from shared.base_service import AbstractService
-from shared.middleware import RequestLoggingMiddleware
+from shared.middleware import LoggingMiddleware
 from shared.metrics import REQUEST_COUNT, REQUEST_LATENCY, setup_metrics
 
 __all__ = [

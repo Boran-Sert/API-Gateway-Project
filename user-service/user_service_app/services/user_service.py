@@ -1,22 +1,47 @@
-from shared.base_service import AbstractService
+from user_service_app.repositories.user_repository import UserRepository
+from user_service_app.models.user import User, UserUpdate
 from shared.base_repository import AbstractRepository
-from user_service_app.models.user import User
 
-class UserService(AbstractService[User]):
-    """
-    Kullanıcılarla ilgili iş kurallarının (business logic) çalıştığı servis sınıfı.
-    Repository'yi dışarıdan (Dependency Injection ile) alır.
-    """
-    def __init__(self, repository: AbstractRepository[User]):
-        super().__init__(repository)
+class UserService:
+    def __init__(self):
+        self._repository: AbstractRepository[User] = UserRepository()
+
+    async def get_or_create_profile(self, user_id: str, user_email: str) -> User:
+        """
+        Kullanıcı profilini ID ile arar. Bulamazsa, e-posta ve varsayılan
+        kullanıcı adıyla yeni bir profil oluşturur.
+        """
+        user = await self._repository.find_by_id(user_id)
+        if not user:
+            # E-postanın ilk kısmını varsayılan kullanıcı adı olarak kullan
+            default_username = user_email.split('@')[0]
+            new_user_profile = User(id=user_id, email=user_email, username=default_username)
+            user = await self._repository.create(new_user_profile)
+        return user
+
+    async def get_my_profile(self, user_id: str, user_email: str) -> dict:
+        """Mevcut kullanıcının profilini getirir ve HATEOAS linkleri ekler."""
+        user = await self.get_or_create_profile(user_id, user_email)
         
-    async def get_all(self, page: int = 1, per_page: int = 10) -> tuple[list[User], int]:
-        """Tüm kullanıcıları sayfalı olarak getirir."""
-        skip = (page - 1) * per_page
-        items = await self._repository.find_all(skip=skip, limit=per_page)
-        total = await self._repository.count()
-        return items, total
+        user_dict = user.model_dump()
+        user_dict["_links"] = {
+            "self": {"href": "/users/me"},
+            "update": {"href": "/users/me", "method": "PUT"},
+        }
+        return user_dict
 
-    async def get_by_id(self, id: str) -> User | None:
-        """Kullanıcı detayını getirir."""
-        return await self._repository.find_by_id(id)
+    async def update_my_profile(self, user_id: str, user_email: str, user_data: UserUpdate) -> dict:
+        """Mevcut kullanıcının profilini günceller."""
+        # Profili al veya oluştur, böylece her zaman güncellenecek bir nesne olur
+        existing_user = await self.get_or_create_profile(user_id, user_email)
+
+        update_data = user_data.model_dump(exclude_unset=True)
+        updated_user = existing_user.model_copy(update=update_data)
+
+        await self._repository.update(user_id, updated_user)
+
+        return {
+            "message": "Profil başarıyla güncellendi",
+            "id": updated_user.id,
+            "_links": {"self": {"href": "/users/me"}},
+        }

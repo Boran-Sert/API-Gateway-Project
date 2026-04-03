@@ -9,8 +9,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- Paylaşılan kütüphaneler ---
 from shared.exceptions import AppException, app_exception_handler
-from shared.middleware import RequestLoggingMiddleware
+from shared.middleware import LoggingMiddleware
 from shared.metrics import setup_metrics
+from shared.logging import setup_logging
 from auth_app.api.router import router 
 
 # --- BAĞLANTI AYARLARI ---
@@ -52,9 +53,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Servise özel logger'ı başlat
+logger = setup_logging("auth-service")
+
 # Exception Handler ve Middleware
 app.add_exception_handler(AppException, app_exception_handler)
-app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(LoggingMiddleware, logger=logger)
 setup_metrics(app, service_name="auth-service")
 
 @app.get("/health")

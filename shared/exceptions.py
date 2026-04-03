@@ -55,6 +55,15 @@ class ValidationException(AppException):
             error_code="VALIDATION_ERROR"
         )
 
+class ForbiddenException(AppException):
+    """Kullanıcının belirli bir kaynağa/işleme erişim yetkisi olmadığında 403 döner."""
+    def __init__(self, detail: str = "Bu kaynak/işlem için yetkiniz bulunmamaktadır."):
+        super().__init__(
+            status_code=403,
+            detail=detail,
+            error_code="FORBIDDEN"
+        )
+
 
 class ServiceUnavailableException(AppException):
     """Dispatcher'ın hedef mikroservise bağlanamadığı durumda 503 döner."""
@@ -82,4 +91,3 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
         },
         
     )
-
