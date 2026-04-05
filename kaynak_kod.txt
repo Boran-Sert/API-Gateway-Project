@@ -1,0 +1,2462 @@
+﻿=== ANA PROJE YAPISI (YORUMSUZ) ===
+  - auth-service/Dockerfile
+    - auth-service/auth_app/__init__.py
+      - auth-service/auth_app/api/__init__.py
+      - auth-service/auth_app/api/router.py
+      - auth-service/auth_app/core/__init__.py
+      - auth-service/auth_app/core/security.py
+    - auth-service/auth_app/main.py
+      - auth-service/auth_app/models/__init__.py
+      - auth-service/auth_app/models/auth.py
+      - auth-service/auth_app/repositories/__init__.py
+      - auth-service/auth_app/repositories/mongo_repository.py
+      - auth-service/auth_app/services/__init__.py
+      - auth-service/auth_app/services/auth_service.py
+    - auth-service/auth_tests/__init__.py
+      - auth-service/auth_tests/integration/__init__.py
+      - auth-service/auth_tests/integration/test_api_auth.py
+      - auth-service/auth_tests/unit/__init__.py
+      - auth-service/auth_tests/unit/test_auth_service.py
+  - auth-service/conftest.py
+  - auth-service/requirements.txt
+  - dispatcher/Dockerfile
+  - dispatcher/__init__.py
+  - dispatcher/conftest.py
+    - dispatcher/dispatcher_app/__init__.py
+      - dispatcher/dispatcher_app/core/router_manager.py
+    - dispatcher/dispatcher_app/main.py
+    - dispatcher/dispatcher_app/requirements.txt
+    - dispatcher/dispatcher_tests/__init__.py
+    - dispatcher/dispatcher_tests/test_auth_middleware.py
+    - dispatcher/dispatcher_tests/test_proxy.py
+  - dispatcher/requirements.txt
+- docker-compose.monitoring.yml
+- docker-compose.yml
+  - product-service/Dockerfile
+  - product-service/conftest.py
+  - product-service/locustfile.py
+    - product-service/product_service_app/__init__.py
+    - product-service/product_service_app/database.py
+    - product-service/product_service_app/db.py
+    - product-service/product_service_app/main.py
+      - product-service/product_service_app/models/product.py
+      - product-service/product_service_app/repositories/product_repository.py
+      - product-service/product_service_app/services/product_service.py
+        - product-service/product_tests/.github/workflows/tests.yml
+    - product-service/product_tests/__init__.py
+    - product-service/product_tests/test_products.py
+  - product-service/requirements.txt
+- prometheus.yml
+- requirements.txt
+  - shared/__init__.py
+  - shared/base_repository.py
+  - shared/base_service.py
+  - shared/exceptions.py
+  - shared/hateoas.py
+  - shared/logging.py
+  - shared/metrics.py
+  - shared/middleware.py
+  - shared/security.py
+    - shared/tests/__init__.py
+    - shared/tests/test_base_repository.py
+    - shared/tests/test_base_service.py
+    - shared/tests/test_exceptions.py
+    - shared/tests/test_hateoas.py
+    - shared/tests/test_metrics.py
+    - shared/tests/test_middleware.py
+- test_api.http
+  - user-service/Dockerfile
+  - user-service/conftest.py
+  - user-service/requirements.txt
+    - user-service/user_service_app/__init__.py
+    - user-service/user_service_app/db.py
+    - user-service/user_service_app/main.py
+      - user-service/user_service_app/models/__init__.py
+      - user-service/user_service_app/models/user.py
+      - user-service/user_service_app/repositories/__init__.py
+      - user-service/user_service_app/repositories/user_repository.py
+      - user-service/user_service_app/services/__init__.py
+      - user-service/user_service_app/services/user_service.py
+    - user-service/user_tests/__init__.py
+    - user-service/user_tests/test_user_api.py
+
+
+
+----- auth-service/Dockerfile -----
+
+FROM python:3.11-slim
+
+ENV PYTHONPATH=/app
+
+WORKDIR /app
+
+COPY auth-service/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY shared /app/shared
+
+COPY auth-service/. /app/
+
+EXPOSE 8001
+
+CMD ["uvicorn", "auth_app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+----- auth-service/auth_app/__init__.py -----
+
+
+----- auth-service/auth_app/api/__init__.py -----
+
+
+----- auth-service/auth_app/api/router.py -----
+
+""" Kimlik doÄŸrulama iÅŸlemlerinin HTTP arayÃ¼zleri  """
+from fastapi import APIRouter, status, Depends, Request, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from auth_app.models.auth import RegisterRequest, LoginRequest
+from auth_app.services.auth_service import AuthService
+router = APIRouter(prefix="/auth", tags=["auth"])
+security = HTTPBearer()
+def get_auth_service(req: Request) -> AuthService:
+    """Uygulama state'inden AuthService'i alÄ±r."""
+    return req.app.state.auth_service
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(request: RegisterRequest, service: AuthService = Depends(get_auth_service)):
+    """ KullanÄ±cÄ± kaydÄ± """
+    user = await service.register(request)
+    return user
+@router.post("/login")
+async def login(request: LoginRequest, service: AuthService = Depends(get_auth_service)):
+    """ KullanÄ±cÄ± giriÅŸi """
+    return await service.login(request)
+@router.post("/validate")
+async def validate(credentials: HTTPAuthorizationCredentials = Security(security), service: AuthService = Depends(get_auth_service)):
+    """ Token doÄŸrulama ve kullanÄ±cÄ± bilgilerini Ã§Ã¶zme """
+    return await service.validate_token(credentials.credentials)
+
+----- auth-service/auth_app/core/__init__.py -----
+
+
+----- auth-service/auth_app/core/security.py -----
+
+from passlib.context import CryptContext
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_password(password: str) -> str:
+    """Åifreyi gÃ¼venli bir ÅŸekilde hashler."""
+    return pwd_context.hash(password)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Gelen ÅŸifreyi kayÄ±tlÄ± hash ile karÅŸÄ±laÅŸtÄ±rÄ±r."""
+    return pwd_context.verify(plain_password, hashed_password)
+
+----- auth-service/auth_app/main.py -----
+
+from fastapi import FastAPI
+import os
+from dotenv import load_dotenv
+import redis.asyncio as aioredis
+from contextlib import asynccontextmanager
+load_dotenv()
+from auth_app.services.auth_service import AuthService
+from auth_app.repositories.mongo_repository import MongoUserRepository
+from motor.motor_asyncio import AsyncIOMotorClient
+from shared.exceptions import AppException, app_exception_handler
+from shared.middleware import LoggingMiddleware
+from shared.metrics import setup_metrics
+from shared.logging import setup_logging
+from auth_app.api.router import router 
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://mongo-auth:27017")
+REDIS_HOST = os.getenv("REDIS_HOST", "redis-cache")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    mongo_client = AsyncIOMotorClient(MONGO_URL)
+    db = mongo_client.get_database("auth_db")
+    user_collection = db.get_collection("credentials")
+    repo = MongoUserRepository(user_collection)
+    redis_conn = aioredis.from_url(
+        f"redis://{REDIS_HOST}:{REDIS_PORT}", 
+        decode_responses=True
+    )
+    app.state.auth_service = AuthService(repository=repo, redis_client=redis_conn)
+    yield                                     
+    await redis_conn.close()
+    mongo_client.close()
+app = FastAPI(
+    title="Auth Service", 
+    version="1.0.0",
+    lifespan=lifespan
+)
+logger = setup_logging("auth-service")
+app.add_exception_handler(AppException, app_exception_handler)
+app.add_middleware(LoggingMiddleware, logger=logger)
+setup_metrics(app, service_name="auth-service")
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "auth-service"}
+app.include_router(router)
+
+----- auth-service/auth_app/models/__init__.py -----
+
+
+----- auth-service/auth_app/models/auth.py -----
+
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
+class UserCredential(BaseModel):
+    """VeritabanÄ±nda tutulacak kimlik bilgisi modeli."""
+    id: str = Field(alias="_id")
+    email: EmailStr
+    hashed_password: str
+    role: str = "user"
+    model_config = ConfigDict(populate_by_name=True)
+class LoginRequest(BaseModel):
+    """GiriÅŸ isteÄŸi ÅŸemasÄ±."""
+    email: EmailStr
+    password: str
+class RegisterRequest(BaseModel):
+    """KayÄ±t isteÄŸi ÅŸemasÄ±."""
+    email: EmailStr
+    password: str
+class UserResponse(BaseModel):
+    """BaÅŸarÄ±lÄ± iÅŸlem sonrasÄ± dÃ¶nÃ¼lecek kullanÄ±cÄ± bilgisi (API Response DTO)."""
+    id: str
+    email: EmailStr
+
+----- auth-service/auth_app/repositories/__init__.py -----
+
+
+----- auth-service/auth_app/repositories/mongo_repository.py -----
+
+from motor.motor_asyncio import AsyncIOMotorCollection
+from shared.base_repository import MongoRepository
+from auth_app.models.auth import UserCredential
+class MongoUserRepository(MongoRepository[UserCredential]):
+    """Kimlik doÄŸrulama iÅŸlemleri iÃ§in MongoDB repository """
+    def __init__(self, collection: AsyncIOMotorCollection):
+        super().__init__(collection, UserCredential)
+    async def find_by_email(self, email: str) -> UserCredential | None:
+        """E-posta adresine gÃ¶re kullanÄ±cÄ±yÄ± bulur."""
+        doc = await self._collection.find_one({"email": email})
+        return UserCredential(**doc) if doc else None
+
+----- auth-service/auth_app/services/__init__.py -----
+
+
+----- auth-service/auth_app/services/auth_service.py -----
+
+import uuid
+import jwt
+import json
+import datetime
+from auth_app.models.auth import (
+    RegisterRequest,
+    LoginRequest,
+    UserCredential,
+    UserResponse,
+)
+from auth_app.repositories.mongo_repository import MongoUserRepository
+from auth_app.core.security import hash_password, verify_password
+from shared.exceptions import ConflictException, UnauthorizedException
+from shared.config import load_config
+config = load_config()
+class AuthService:
+    def __init__(self, repository: MongoUserRepository, redis_client=None):
+        self._repository = repository
+        self._redis = redis_client
+        self.secret_key = config.jwt.secret_key
+        self.algorithm = config.jwt.algorithm
+        self.expire_seconds = config.jwt.expire_seconds
+    async def register(self, request: RegisterRequest) -> UserResponse:
+        """Yeni bir kullanÄ±cÄ± kaydeder."""
+        existing_user = await self._repository.find_by_email(request.email)
+        if existing_user:
+            raise ConflictException("Bu e-posta zaten kullanÄ±lÄ±yor")
+        hashed_pw = hash_password(request.password)
+        user_id = str(uuid.uuid4())
+        assigned_role = "admin" if request.email.startswith("admin") else "user"
+        user_cred = UserCredential(
+            _id=user_id,                                     
+            email=request.email,
+            hashed_password=hashed_pw,
+            role=assigned_role,                        
+        )
+        await self._repository.create(user_cred)
+        await self._repository.create(user_cred)
+        return UserResponse(id=user_id, email=request.email)
+    async def login(self, request: LoginRequest):
+        """KullanÄ±cÄ± giriÅŸini doÄŸrular ve Redis'e oturum yazar."""
+        user = await self._repository.find_by_email(request.email)
+        if not user:
+            raise UnauthorizedException("GeÃ§ersiz e-posta")
+        if not verify_password(request.password, user.hashed_password):
+            raise UnauthorizedException("GeÃ§ersiz ÅŸifre")
+        payload = {
+            "sub": user.email,
+            "user_id": str(user.id),
+            "role": user.role,
+            "exp": datetime.datetime.now(datetime.timezone.utc)
+            + datetime.timedelta(seconds=self.expire_seconds),
+        }
+        token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+        if self._redis:
+            session_data = json.dumps(
+                {
+                    "email": user.email,
+                    "user_id": str(user.id),
+                    "role": user.role,
+                }
+            )
+            await self._redis.set(
+                f"token:{token}", session_data, ex=self.expire_seconds
+            )
+        return {"token": token}
+    async def validate_token(self, token: str) -> dict:
+        """Token'Ä± doÄŸrular. Ã–nce Redis'e, sonra JWT'ye bakar."""
+        if self._redis:
+            session_data = await self._redis.get(f"token:{token}")
+            if session_data:
+                return json.loads(session_data)
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            return {
+                "email": payload.get("sub"),
+                "user_id": payload.get("user_id"),
+                "role": payload.get("role", "user"),
+            }
+        except jwt.ExpiredSignatureError:
+            raise UnauthorizedException("Token sÃ¼resi dolmuÅŸ")
+        except jwt.InvalidTokenError:
+            raise UnauthorizedException("GeÃ§ersiz token")
+
+----- auth-service/auth_tests/__init__.py -----
+
+
+----- auth-service/auth_tests/integration/__init__.py -----
+
+
+----- auth-service/auth_tests/integration/test_api_auth.py -----
+
+import pytest
+from fastapi import status
+from fastapi.testclient import TestClient
+from auth_app.main import app
+from auth_app.api.router import get_auth_service
+from auth_app.services.auth_service import AuthService
+from auth_app.models.auth import UserCredential
+class MockUserRepository:
+    def __init__(self):
+        self.fake_db = []
+    async def find_by_email(self, email: str) -> UserCredential | None:
+        for user in self.fake_db:
+            if user.email == email:
+                return user
+        return None
+    async def create(self, entity: UserCredential) -> UserCredential:
+        self.fake_db.append(entity)
+        return entity
+mock_repo = MockUserRepository()
+mock_auth_service = AuthService(repository=mock_repo)
+def override_get_auth_service():
+    return mock_auth_service
+app.dependency_overrides[get_auth_service] = override_get_auth_service
+client = TestClient(app)
+@pytest.fixture(autouse=True)
+def clear_mock_db():
+    mock_repo.fake_db.clear()
+    yield
+def test_api_register_success():
+    """ BaÅŸarÄ±lÄ± bir kaydÄ± test eder """
+    response = client.post(
+        "/auth/register",
+        json={"email": "test@example.com", "password": "test"}
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    assert "_id" in response.json()
+    assert response.json()["email"] == "test@example.com"
+def test_api_register_existing_email():
+    """ Sistemde var olan email ile kayÄ±t olma testi """
+    client.post("/auth/register", json={"email": "test@example.com", "password": "test"}) 
+    response = client.post("/auth/register", json={"email": "test@example.com", "password": "test"})
+    assert response.status_code == status.HTTP_409_CONFLICT
+    assert response.json()["error"]["detail"] == "Bu e-posta zaten kullanÄ±lÄ±yor"
+def test_api_login_success():
+    """ BaÅŸarÄ±lÄ± giriÅŸ iÅŸlemini test eder """
+    client.post("/auth/register", json={"email": "login_test@example.com", "password": "test"})
+    response = client.post("/auth/login", json={"email": "login_test@example.com", "password": "test"})
+    assert response.status_code == status.HTTP_200_OK
+    response_data = response.json()
+    assert "token" in response_data
+def test_api_validate_success():
+    """ DoÄŸru bir token ile /validate iÅŸlemini test eder """
+    client.post("/auth/register", json={"email": "validate_test@example.com", "password": "test"})
+    res = client.post("/auth/login", json={"email": "validate_test@example.com", "password": "test"})
+    token = res.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    validate_res = client.post("/auth/validate", headers=headers)
+    assert validate_res.status_code == status.HTTP_200_OK
+    data = validate_res.json()
+    assert data["email"] == "validate_test@example.com"
+    assert "user_id" in data
+    assert data["role"] == "user"
+def test_api_validate_invalid_token():
+    """ GeÃ§ersiz veya eksik token durumunda 401/403 dÃ¶nmeli """
+    headers = {"Authorization": "Bearer not.a.valid.token"}
+    response = client.post("/auth/validate", headers=headers)
+    assert response.status_code in [401, 403]
+
+----- auth-service/auth_tests/unit/__init__.py -----
+
+
+----- auth-service/auth_tests/unit/test_auth_service.py -----
+
+""" Unit testleri iÃ§in AuthService test dosyasÄ± """
+import pytest
+from unittest.mock import AsyncMock, patch
+from auth_app.services.auth_service import AuthService
+from auth_app.models.auth import RegisterRequest, LoginRequest
+import jwt
+@pytest.mark.asyncio
+@patch("auth_app.services.auth_service.hash_password", return_value="fake_hashed_pw")
+async def test_register_user_success(mock_hash):
+    mock_repo = AsyncMock()
+    mock_repo.find_by_email.return_value = None
+    service = AuthService(repository=mock_repo)
+    request = RegisterRequest(email="test@example.com", password="password123")
+    user = await service.register(request)
+    assert user.email == "test@example.com"
+    mock_repo.create.assert_called_once()
+    mock_hash.assert_called_once_with("password123")
+@pytest.mark.asyncio
+@patch("auth_app.services.auth_service.hash_password", return_value="fake_hashed_pw")
+@patch("auth_app.services.auth_service.verify_password", return_value=True)
+async def test_login_returns_jwt_token(mock_verify, mock_hash):
+    """ Login baÅŸarlÄ± olduÄŸunda token dÃ¶nmeli """
+    mock_repo = AsyncMock()
+    mock_repo.find_by_email.return_value = AsyncMock(
+        email = "test@example.com",
+        hashed_password = "fake_pw"
+    )
+    service = AuthService(repository =mock_repo)
+    request = LoginRequest(email= "test@example.com", password = "password123")
+    result = await service.login(request)
+    assert "token" in result
+    decoded = jwt.decode(result["token"], options = {"verify_signature": False})
+    assert decoded["sub"] == "test@example.com"
+@pytest.mark.asyncio
+@patch("auth_app.services.auth_service.hash_password", return_value="fake_hashed_pw")
+@patch("auth_app.services.auth_service.verify_password", return_value=True)
+async def test_login_saves_token_to_redis(mock_verify, mock_hash):
+    """ Token baÅŸarlÄ± olduÄŸunda REDÄ°S'e kaydetmeli """
+    mock_repo = AsyncMock()
+    mock_redis = AsyncMock()
+    mock_repo.find_by_email.return_value = AsyncMock(
+        id = "mock_id",
+        email = "test@example.com",
+        role = "user",
+        hashed_password = "fakepsw"
+    )
+    service = AuthService(repository = mock_repo, redis_client = mock_redis)
+    request = LoginRequest(email = "test@example.com", password = "pas123")
+    result = await service.login(request)
+    mock_redis.set.assert_called_once()
+    import json
+    args, kwargs = mock_redis.set.call_args
+    assert args[0] == f"token:{result['token']}"
+    redis_data = json.loads(args[1])
+    assert redis_data["email"] == "test@example.com"
+    assert redis_data["user_id"] == "mock_id"
+    assert redis_data["role"] == "user"
+    assert kwargs["ex"] == 3600
+
+----- auth-service/conftest.py -----
+
+"""
+conftest.py â€” Root dizini sys.path'e ekler.
+Shared kÃ¼tÃ¼phanesine eriÅŸim saÄŸlamak iÃ§in gereklidir.
+"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+----- auth-service/requirements.txt -----
+
+# â”€â”€â”€â”€ Framework â”€â”€â”€â”€
+fastapi>=0.110.0,<1.0.0
+uvicorn>=0.27.0,<1.0.0
+pydantic>=2.6.0,<3.0.0
+pydantic[email]
+
+# â”€â”€â”€â”€ Database â”€â”€â”€â”€
+motor>=3.3.1,<3.7.0
+pymongo>=4.6.0,<4.8.0
+
+# â”€â”€â”€â”€ Auth â”€â”€â”€â”€
+passlib[bcrypt]>=1.7.4,<2.0.0
+bcrypt>=3.2.0,<4.1.0
+pyjwt>=2.8.0,<3.0.0
+
+# â”€â”€â”€â”€ Cache â”€â”€â”€â”€
+redis>=5.0.0,<6.0.0
+
+# â”€â”€â”€â”€ Monitoring â”€â”€â”€â”€
+prometheus-client>=0.20.0,<1.0.0
+prometheus-fastapi-instrumentator>=7.0.0,<8.0.0
+
+# â”€â”€â”€â”€ Testing â”€â”€â”€â”€
+pytest>=8.0.0,<9.0.0
+pytest-asyncio>=0.23.0,<1.0.0
+httpx>=0.27.0,<1.0.0
+
+# â”€â”€â”€â”€ Environment â”€â”€â”€â”€
+python-dotenv>=1.0.0
+PyYAML>=6.0
+PyYAML>=6.0
+
+
+----- dispatcher/Dockerfile -----
+
+FROM python:3.11-slim
+
+ENV PYTHONPATH=/app
+
+WORKDIR /app
+
+COPY dispatcher/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY shared /app/shared
+
+COPY dispatcher/. /app/
+
+EXPOSE 8000
+
+CMD ["uvicorn", "dispatcher_app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+----- dispatcher/__init__.py -----
+
+
+----- dispatcher/conftest.py -----
+
+"""
+conftest.py â€” Root dizini sys.path'e ekler.
+Shared kÃ¼tÃ¼phanesine eriÅŸim saÄŸlamak iÃ§in gereklidir.
+"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+----- dispatcher/dispatcher_app/__init__.py -----
+
+
+----- dispatcher/dispatcher_app/core/router_manager.py -----
+
+import yaml
+from typing import Dict, Any, Optional
+class RouteManager:
+    """YÃ¶nlendirme rotalarÄ±nÄ± yÃ¶neten OCP uyumlu sÄ±nÄ±f."""
+    def __init__(self, config_file: str):
+        self.routes = self._load_routes(config_file)
+    def _load_routes(self, config_file: str) -> list[Dict[str, Any]]:
+        with open(config_file, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        return data.get("routes", [])
+    def get_route(self, path: str) -> Optional[Dict[str, Any]]:
+        """Path ile eÅŸleÅŸen ilk rotayÄ± dÃ¶ndÃ¼rÃ¼r. (Bug #2 Ã‡Ã¶zÃ¼mÃ¼)"""
+        sorted_routes = sorted(
+            self.routes, key=lambda x: len(x["match_prefix"]), reverse=True
+        )
+        for route in sorted_routes:
+            prefix = route["match_prefix"]
+            if path == prefix or path.startswith(prefix + "/"):
+                return route
+        return None
+    def build_target_url(
+        self, route: Dict[str, Any], original_path: str, query_params: str
+    ) -> str:
+        """Hedef URL'yi inÅŸa eder."""
+        target_base = route["target_url"]
+        prefix = route["match_prefix"]
+        if route.get("strip_prefix", False):
+            path_remainder = original_path[len(prefix) :]
+            if path_remainder and not path_remainder.startswith("/"):
+                path_remainder = "/" + path_remainder
+        else:
+            path_remainder = original_path
+        target_url = target_base.rstrip("/") + path_remainder
+        if query_params:
+            target_url = f"{target_url}?{query_params}"
+        return target_url
+
+----- dispatcher/dispatcher_app/main.py -----
+
+import os
+from dotenv import load_dotenv
+import httpx
+from fastapi import FastAPI, Request, Response
+from contextlib import asynccontextmanager
+from dispatcher_app.core.router_manager import RouteManager
+from dispatcher_app.core.authenticator import Authenticator
+from shared.logging import setup_logging
+from shared.middleware import LoggingMiddleware
+from shared.exceptions import (
+    ServiceUnavailableException,
+    AppException,
+    app_exception_handler,
+)
+from shared.metrics import setup_metrics
+load_dotenv()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROUTES_CONFIG = os.path.join(BASE_DIR, "routes.yaml")
+AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://auth-service:8001")
+router_manager = RouteManager(ROUTES_CONFIG)
+authenticator = Authenticator(AUTH_SERVICE_URL)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with httpx.AsyncClient() as client:
+        app.state.http_client = client
+        yield
+app = FastAPI(title="API Gateway (Dispatcher)", version="1.0.0", lifespan=lifespan)
+logger = setup_logging("dispatcher")
+app.add_middleware(LoggingMiddleware, logger=logger)
+app.add_exception_handler(AppException, app_exception_handler)
+setup_metrics(app, "api-gateway")
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "dispatcher"}
+@app.api_route(
+    "/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+)
+async def route_request(request: Request, path: str):
+    full_path = f"/{path}"
+    route = router_manager.get_route(full_path)
+    if not route:
+        if full_path in ["/docs", "/openapi.json"]:
+            return Response(status_code=404, content="Endpoint not found")
+        return Response(status_code=404, content="Endpoint not found")
+    if route.get("require_auth", False):
+        await authenticator.authenticate(request)
+    query_params = str(request.query_params)
+    target_url = router_manager.build_target_url(route, full_path, query_params)
+    client: httpx.AsyncClient = request.app.state.http_client
+    headers = dict(request.headers)
+    if hasattr(request.state, "user_id"):
+        headers["X-User-ID"] = str(request.state.user_id)
+        headers["X-User-Email"] = request.state.user_email
+        headers["X-User-Role"] = request.state.user_role
+    headers.pop("host", None)
+    try:
+        rp = await client.request(
+            method=request.method,
+            url=target_url,
+            headers=headers,
+            content=await request.body(),
+            timeout=30.0,
+        )
+    except httpx.RequestError as e:
+        service_name = target_url.split("//")[1].split(":")[0]
+        logger.error(f"Upstream request failed: {e}")
+        raise ServiceUnavailableException(service_name)
+    return Response(
+        content=rp.content, status_code=rp.status_code, headers=dict(rp.headers)
+    )
+
+----- dispatcher/dispatcher_app/requirements.txt -----
+
+fastapi
+uvicorn
+httpx
+motor
+
+----- dispatcher/dispatcher_tests/__init__.py -----
+
+
+----- dispatcher/dispatcher_tests/test_auth_middleware.py -----
+
+import pytest
+from fastapi import FastAPI, Depends, Request
+from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock, patch
+from shared.exceptions import UnauthorizedException, app_exception_handler, AppException
+app = FastAPI()
+app.add_exception_handler(AppException, app_exception_handler)
+async def mock_auth_dependency(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise UnauthorizedException("Eksik veya geÃ§ersiz token")
+    token = auth_header.split(" ")[1]
+    if token == "valid_token":
+        return "testuser@example.com"
+    else:
+        raise UnauthorizedException("GeÃ§ersiz veya sÃ¼resi dolmuÅŸ token")
+@app.get("/protected")
+async def protected_route(user_email: str = Depends(mock_auth_dependency)):
+    return {"message": "GiriÅŸ izni verildi", "user": user_email}
+client = TestClient(app)
+def test_protected_route_without_token():
+    """Token olmadan yapÄ±lan istek 401 dÃ¶nmeli."""
+    response = client.get("/protected")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+def test_protected_route_with_invalid_token():
+    """GeÃ§ersiz token ile yapÄ±lan istek 401 dÃ¶nmeli."""
+    response = client.get("/protected", headers={"Authorization": "Bearer fake_token"})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+def test_protected_route_with_valid_token():
+    """GeÃ§erli token ile yapÄ±lan istek baÅŸarÄ±lÄ± olmalÄ± ve kullanÄ±cÄ± bilgisini almalÄ±."""
+    response = client.get("/protected", headers={"Authorization": "Bearer valid_token"})
+    assert response.status_code == 200
+    assert response.json()["user"] == "testuser@example.com"
+
+----- dispatcher/dispatcher_tests/test_proxy.py -----
+
+""" Proxy Testleri """
+from fastapi.testclient import TestClient
+from dispatcher_app.main import app 
+from unittest.mock import patch, AsyncMock
+from httpx import Response, Request
+import pytest
+client = TestClient(app)
+def test_dispatcher_health_returns_200():
+    """ /health endpoint 200 dÃ¶ndÃ¼rmeli sistem ayakta """
+    with TestClient(app) as client:
+        response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "service": "dispatcher"}
+@patch("dispatcher_app.main.authenticator.authenticate", new_callable=AsyncMock)
+@patch("httpx.AsyncClient.request", new_callable=AsyncMock)
+def test_dispatcher_routes_request_to_user_service(mock_request, mock_auth):
+    """/api/users isteÄŸi user-service'e yÃ¶nlendirilmeli (auth mocklanarak)."""
+    mock_auth.return_value = None
+    mock_request.return_value = Response(
+        status_code=200, 
+        json={"data": "mocked users"},
+        request=Request("GET", "http://user-service:8002/")                              
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/users")
+    assert response.status_code == 200
+    assert response.json() == {"data": "mocked users"}
+    mock_request.assert_called_once()
+    args, kwargs = mock_request.call_args
+    assert kwargs["url"] == "http://user-service:8002/"
+@patch("dispatcher_app.main.authenticator.authenticate", new_callable=AsyncMock)
+@patch("httpx.AsyncClient.request", new_callable=AsyncMock)
+def test_dispatcher_routes_request_to_product_service(mock_request, mock_auth):
+    """/api/products isteÄŸi product-service'e yÃ¶nlendirilmeli."""
+    mock_auth.return_value = None
+    mock_request.return_value = Response(
+        status_code=200, 
+        json={"data": [{"id": "1", "name": "Test ÃœrÃ¼nÃ¼", "price": 100}]},
+        request=Request("GET", "http://product-service:8003/")
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/products")
+    assert response.status_code == 200
+    assert response.json() == {"data": [{"id": "1", "name": "Test ÃœrÃ¼nÃ¼", "price": 100}]}
+    mock_request.assert_called_once()
+    args, kwargs = mock_request.call_args
+    assert kwargs["url"] == "http://product-service:8003/"
+
+----- dispatcher/requirements.txt -----
+
+# â”€â”€â”€â”€ Framework â”€â”€â”€â”€
+fastapi>=0.110.0,<1.0.0
+uvicorn>=0.27.0,<1.0.0
+
+# â”€â”€â”€â”€ Database â”€â”€â”€â”€
+motor>=3.3.1,<3.7.0
+pymongo>=4.6.0,<4.8.0
+
+# â”€â”€â”€â”€ HTTP Client â”€â”€â”€â”€
+httpx>=0.27.0,<1.0.0
+
+# â”€â”€â”€â”€ Testing â”€â”€â”€â”€
+pytest>=8.0.0,<9.0.0
+
+# â”€â”€â”€â”€ Redis & Monitoring â”€â”€â”€â”€
+redis>=5.0.0,<6.0.0
+prometheus-fastapi-instrumentator>=7.0.0,<8.0.0
+
+# â”€â”€â”€â”€ Logging â”€â”€â”€â”€
+python-json-logger>=2.0.0,<3.0.0
+
+# â”€â”€â”€â”€ Environment â”€â”€â”€â”€
+python-dotenv>=1.0.0
+PyYAML>=6.0
+
+
+----- docker-compose.monitoring.yml -----
+
+
+
+
+----- docker-compose.yml -----
+
+version: '3.8'
+
+services:
+  dispatcher:
+    build:
+      context: .
+      dockerfile: dispatcher/Dockerfile
+    container_name: api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URL=mongodb://mongo-dispatcher:27017
+      - AUTH_SERVICE_URL=http://auth-service:8000
+      - USER_SERVICE_URL=http://user-service:8002
+      - PRODUCT_SERVICE_URL=http://product-service:8003
+      - REDIS_HOST=redis-cache
+      - REDIS_PORT=6379
+    depends_on:
+      - mongo-dispatcher
+      - redis
+    networks:
+      - micro-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - micro-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - micro-network
+    depends_on:
+      - prometheus
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    container_name: auth-service
+    environment:
+      - MONGO_URL=mongodb://mongo-auth:27017
+      - REDIS_HOST=redis-cache
+      - REDIS_PORT=6379
+    depends_on:
+      - mongo-auth
+      - redis
+    networks:
+      - micro-network
+    ports:
+      - "8001:8000"
+
+  redis:
+    image: redis:alpine
+    container_name: redis-cache
+    networks:
+      - micro-network
+
+  product-service:
+    build:
+      context: .
+      dockerfile: product-service/Dockerfile
+    container_name: product-service
+    ports:
+      - "8003:8003"
+    environment:
+      - MONGO_URL=mongodb://mongo-product:27017
+    depends_on:
+      - mongo-product
+    networks:
+      - micro-network
+
+  user-service:
+    build:
+      context: .
+      dockerfile: user-service/Dockerfile
+    container_name: user-service
+    ports:
+      - "8002:8002"
+    environment:
+      - MONGO_URL=mongodb://mongo-user:27017
+    depends_on:
+      - mongo-user
+    networks:
+      - micro-network
+
+  mongo-dispatcher:
+    image: mongo:latest
+    container_name: mongo-dispatcher
+    ports:
+      - "27020:27017" # Gateway DB
+    networks:
+      - micro-network
+
+  mongo-product:
+    image: mongo:latest
+    container_name: mongo-product
+    ports:
+      - "27019:27017" # ÃœrÃ¼nler DB
+    volumes:
+      - mongo_product_data:/data/db
+    networks:
+      - micro-network
+
+  mongo-user:
+    image: mongo:latest
+    container_name: mongo-user
+    ports:
+      - "27018:27017" # KullanÄ±cÄ±lar DB
+    volumes:
+      - mongo_user_data:/data/db
+    networks:
+      - micro-network
+
+  mongo-auth:
+    image: mongo:latest
+    container_name: mongo-auth
+    ports:
+      - "27017:27017" # Auth DB
+    volumes:
+      - mongo_auth_data:/data/db
+    networks:
+      - micro-network
+
+networks:
+  micro-network:
+    driver: bridge
+
+volumes:
+  mongo_auth_data:
+  mongo_product_data:
+  mongo_user_data:
+
+
+----- product-service/Dockerfile -----
+
+FROM python:3.11-slim
+
+ENV PYTHONPATH=/app
+
+WORKDIR /app
+
+COPY product-service/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY shared /app/shared
+
+COPY product-service/. /app/
+
+EXPOSE 8003
+
+CMD ["uvicorn", "product_service_app.main:app", "--host", "0.0.0.0", "--port", "8003"]
+
+----- product-service/conftest.py -----
+
+"""
+conftest.py â€” Root dizini sys.path'e ekler.
+Shared kÃ¼tÃ¼phanesine eriÅŸim saÄŸlamak iÃ§in gereklidir.
+"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+----- product-service/locustfile.py -----
+
+from locust import HttpUser, task, between
+import random
+class ProductServiceSimulator(HttpUser):
+    """
+    Her kullanici, iÅŸlemler arasinda 1 ile 3 saniye arasi rastgele bekler.
+    """
+    wait_time = between(1, 3)
+    @task(3)
+    def view_products(self):
+        """
+        ÃœrÃ¼nleri listelemek.
+        @task(3) diyerek bu iÅŸlemin diÄŸerine gÃ¶re 3 kat daha fazla yapmayi sagladik.
+        """
+        with self.client.get("/products", catch_response=True) as response:
+            if response.status_code == 200:
+                response.success()
+            else:
+                response.failure(f"Listeleme BaÅŸarisiz: {response.status_code}")
+    @task(1)
+    def add_product(self):
+        """
+        Yeni Ã¼rÃ¼n ekleme.
+        """
+        new_product = {
+            "name": f"Locust Test ÃœrÃ¼nÃ¼ {random.randint(1, 10000)}",
+            "price": round(random.uniform(50.0, 5000.0), 2),
+            "category": "YÃ¼k Testi",
+            "stock": random.randint(1, 100)
+        }
+        with self.client.post("/products", json=new_product, catch_response=True) as response:
+            if response.status_code == 201:
+                response.success()
+            else:
+                response.failure(f"Ekleme BaÅŸarisiz: {response.status_code}")
+
+----- product-service/product_service_app/__init__.py -----
+
+
+----- product-service/product_service_app/db.py -----
+
+import os
+from motor.motor_asyncio import AsyncIOMotorClient
+from contextlib import asynccontextmanager
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = "product_db"
+client: AsyncIOMotorClient = None
+def get_database() -> AsyncIOMotorClient:
+    """VeritabanÄ± baÄŸlantÄ±sÄ±nÄ± dÃ¶ndÃ¼rÃ¼r."""
+    return client[DB_NAME]
+@asynccontextmanager
+async def lifespan(app):
+    """Uygulama yaÅŸam dÃ¶ngÃ¼sÃ¼ boyunca veritabanÄ± baÄŸlantÄ±sÄ±nÄ± yÃ¶netir."""
+    global client
+    client = AsyncIOMotorClient(MONGO_URL)
+    yield
+    client.close()
+
+----- product-service/product_service_app/main.py -----
+
+from fastapi import FastAPI, Depends, Query, status
+from dotenv import load_dotenv
+load_dotenv()
+from product_service_app.services.product_service import ProductService
+from product_service_app.models.product import ProductCreate, ProductResponse
+from product_service_app.db import lifespan
+from product_service_app.repositories.product_repository import ProductRepository
+from shared.exceptions import AppException, app_exception_handler
+from shared.logging import setup_logging
+from shared.security import RoleChecker
+from shared.middleware import LoggingMiddleware
+from shared.metrics import setup_metrics
+app = FastAPI(
+    title="Product Service", 
+    version="1.0.0",
+    lifespan=lifespan
+)
+logger = setup_logging("product-service")
+app.add_exception_handler(AppException, app_exception_handler)
+setup_metrics(app, "product-service")
+app.add_middleware(LoggingMiddleware, logger=logger)
+def get_product_repository():
+    return ProductRepository()
+def get_product_service(repo: ProductRepository = Depends(get_product_repository)):
+    return ProductService(repository=repo)
+@app.get("/products", include_in_schema=True)
+async def get_products(
+    page: int = Query(1, ge=1), 
+    limit: int = Query(5, ge=1, le=100),
+    service: ProductService = Depends(get_product_service)
+):
+    """
+    TÃ¼m Ã¼rÃ¼nleri sayfalama ve HATEOAS desteÄŸi ile dÃ¶ner.
+    """
+    return await service.get_all_paginated(page, limit)
+@app.get("/products/{product_id}")
+async def get_product(
+    product_id: str,
+    service: ProductService = Depends(get_product_service)
+):
+    """
+    ID ile tek bir Ã¼rÃ¼n getirir.
+    """
+    return await service.get_product_by_id(product_id)
+@app.post(
+    "/products", 
+    status_code=status.HTTP_201_CREATED, 
+    response_model=ProductResponse,
+    dependencies=[Depends(RoleChecker(["admin"]))]
+)
+async def create_product(
+    product: ProductCreate, 
+    service: ProductService = Depends(get_product_service)
+):
+    """
+    Yeni bir Ã¼rÃ¼n oluÅŸturur ve 201 Created dÃ¶ner.
+    """
+    return await service.create_product(product)
+@app.put("/products/{product_id}",
+         dependencies=[Depends(RoleChecker(["admin"]))])
+async def update_product(
+    product_id: str,
+    product: ProductCreate,
+    service: ProductService = Depends(get_product_service)
+):
+    """
+    Mevcut bir Ã¼rÃ¼nÃ¼ gÃ¼nceller.
+    """
+    return await service.update_product(product_id, product)
+@app.delete("/products/{product_id}", status_code=status.HTTP_200_OK, dependencies=[Depends(RoleChecker(["admin"]))])
+async def delete_product(
+    product_id: str,
+    service: ProductService = Depends(get_product_service)
+):
+    """
+    Bir Ã¼rÃ¼nÃ¼ siler.
+    """
+    return await service.delete_product(product_id)
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "product-service"}
+
+----- product-service/product_service_app/models/product.py -----
+
+from pydantic import BaseModel, Field
+from uuid import uuid4
+class ProductBase(BaseModel):
+    name: str = Field(..., min_length=3, max_length=100, description="ÃœrÃ¼n adÄ±")
+    price: float = Field(..., gt=0, description="ÃœrÃ¼n fiyatÄ± (0'dan bÃ¼yÃ¼k olmalÄ±)")
+    category: str = Field(
+        ..., min_length=2, max_length=50, description="ÃœrÃ¼n kategorisi"
+    )
+    stock: int = Field(..., ge=0, description="Stok adedi (0 veya daha fazla olmalÄ±)")
+class ProductCreate(ProductBase):
+    pass
+class Product(ProductBase):
+    id: str = Field(
+        default_factory=lambda: str(uuid4()),
+        alias="_id",
+        description="ÃœrÃ¼nÃ¼n benzersiz ID'si (MongoDB'deki _id alanÄ±na karÅŸÄ±lÄ±k gelir)",
+    )
+    model_config = {"populate_by_name": True}
+class ProductResource:
+    """Product domain modelinin API sunum katmanÄ±na dÃ¶nÃ¼ÅŸtÃ¼rÃ¼cÃ¼sÃ¼ (SRP)."""
+    @staticmethod
+    def from_domain(product: "Product", base_path: str = "/api/products") -> dict:
+        """
+        Domain modelinden API resource sÃ¶zlÃ¼ÄŸÃ¼ Ã¼retir.
+        Factory Method Pattern â€” dÃ¶nÃ¼ÅŸÃ¼m mantÄ±ÄŸÄ± tek yerde toplanÄ±r (SRP).
+        """
+        product_dict = product.model_dump(by_alias=False)
+        product_dict["_links"] = {
+            "self": {"href": f"{base_path}/{product.id}", "method": "GET"},
+            "update": {"href": f"{base_path}/{product.id}", "method": "PUT"},
+            "delete": {"href": f"{base_path}/{product.id}", "method": "DELETE"},
+        }
+        return product_dict
+class ProductResponse(BaseModel):
+    message: str
+    id: str
+
+----- product-service/product_service_app/repositories/product_repository.py -----
+
+from product_service_app.models.product import Product
+from shared.base_repository import MongoRepository
+from product_service_app.db import get_database
+class ProductRepository(MongoRepository[Product]):
+    """Product veritabanÄ± iÅŸlemleri iÃ§in somut repository."""
+    def __init__(self):
+        database = get_database()
+        product_collection = database.get_collection("products")
+        super().__init__(collection=product_collection, model_class=Product)
+
+----- product-service/product_service_app/services/product_service.py -----
+
+from product_service_app.models.product import (
+    Product,
+    ProductCreate,
+    ProductResponse,
+    ProductResource,
+)
+from shared.hateoas import HateoasBuilder
+from shared.exceptions import NotFoundException
+from shared.base_repository import AbstractRepository
+class ProductService:
+    """ÃœrÃ¼n iÅŸ mantÄ±ÄŸÄ± servisi (SRP â€” sadece iÅŸ kurallarÄ±nÄ± yÃ¶netir)."""
+    def __init__(self, repository: AbstractRepository[Product]):
+        self._repository = repository
+        self._hateoas_builder = HateoasBuilder(base_url="/api")
+    async def get_all_paginated(self, page: int, limit: int):
+        """ÃœrÃ¼nleri sayfalÄ± ÅŸekilde getirir â€” Resource Assembler + Strategy Pattern."""
+        skip = (page - 1) * limit
+        products = await self._repository.find_all(skip=skip, limit=limit)
+        total_products = await self._repository.count()
+        paginated_response = self._hateoas_builder.collection_response(
+            items=products,
+            resource_name="products",
+            page=page,
+            per_page=limit,
+            total=total_products,
+            item_serializer=ProductResource.from_domain,
+        )
+        return paginated_response
+    async def get_product_by_id(self, product_id: str) -> dict:
+        """ID ile tek bir Ã¼rÃ¼n getirir â€” Resource Assembler Pattern."""
+        product = await self._repository.find_by_id(product_id)
+        if not product:
+            raise NotFoundException(resource_name="Product", resource_id=product_id)
+        product_resource = ProductResource.from_domain(product)
+        product_resource["_links"]["collection"] = {"href": "/api/products"}
+        return product_resource
+    async def update_product(
+        self, product_id: str, product_data: ProductCreate
+    ) -> dict:
+        """Bir Ã¼rÃ¼nÃ¼ gÃ¼nceller ve HATEOAS linkleri ile dÃ¶ner."""
+        if not await self._repository.find_by_id(product_id):
+            raise NotFoundException(resource_name="Product", resource_id=product_id)
+        updated_product_model = Product(id=product_id, **product_data.model_dump())
+        result = await self._repository.update(product_id, updated_product_model)
+        final_product = result if result else updated_product_model
+        return {
+            "message": "ÃœrÃ¼n baÅŸarÄ±yla gÃ¼ncellendi",
+            "id": final_product.id,
+            "_links": {
+                "self": {"href": f"/api/products/{final_product.id}"},
+                "collection": {"href": "/api/products"},
+            },
+        }
+    async def delete_product(self, product_id: str) -> dict:
+        """Bir Ã¼rÃ¼nÃ¼ siler ve HATEOAS linkleri ile dÃ¶ner."""
+        was_deleted = await self._repository.delete(product_id)
+        if not was_deleted:
+            raise NotFoundException(resource_name="Product", resource_id=product_id)
+        return {
+            "message": "ÃœrÃ¼n baÅŸarÄ±yla silindi",
+            "_links": {"collection": {"href": "/api/products"}},
+        }
+    async def create_product(self, product_data: ProductCreate) -> ProductResponse:
+        """Yeni bir Ã¼rÃ¼nÃ¼ MongoDB'ye kaydeder."""
+        product_to_save = Product(**product_data.model_dump())
+        created_product = await self._repository.create(product_to_save)
+        return ProductResponse(message="ÃœrÃ¼n baÅŸarÄ±yla eklendi", id=created_product.id)
+
+----- product-service/product_tests/.github/workflows/tests.yml -----
+
+name: Python CI (Microservices Tests)
+
+on:
+  push:
+    branches: [ "dev", "main" ]
+  pull_request:
+    branches: [ "dev", "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r product-service/requirements.txt
+        pip install -r dispatcher/requirements.txt
+        pip install pytest httpx fastapi motor uvicorn
+
+    - name: Run Product Service Tests
+      run: |
+        cd product-service
+        python -m pytest tests/
+
+    - name: Run Dispatcher Routing Tests
+      run: |
+        cd dispatcher
+        python -m pytest tests/
+
+----- product-service/product_tests/__init__.py -----
+
+
+----- product-service/product_tests/test_products.py -----
+
+from fastapi.testclient import TestClient
+from product_service_app.main import app, get_product_service
+from product_service_app.services.product_service import ProductService
+from unittest.mock import AsyncMock
+client = TestClient(app)
+class MockProductRepository:
+    def __init__(self):
+        self.fake_db = []
+    async def get_all_products(self):
+        return self.fake_db
+    async def create(self, product_data):
+        self.fake_db.append(product_data)
+        return product_data
+    async def delete(self, product_id: str):
+        initial_length = len(self.fake_db)
+        self.fake_db = [p for p in self.fake_db if p.get("_id") != product_id]                              
+        return len(self.fake_db) < initial_length
+    async def update(self, product_id: str, update_data):
+        for p in self.fake_db:
+            if p.get("_id") == product_id:
+                p.update(update_data)
+                return p
+        return None
+    async def get_all_paginated(self, page: int, limit: int):                                                                                          
+        pass
+def _override_service(mock_service):
+    app.dependency_overrides[get_product_service] = lambda: mock_service
+def test_get_empty_products_list():
+    mock_service = AsyncMock(spec=ProductService)
+    mock_service.get_all_paginated.return_value = {"data": [], "page": 1, "limit": 5, "total": 0}
+    _override_service(mock_service)
+    response = client.get("/products")
+    assert response.status_code == 200
+    assert isinstance(response.json()["data"], list)
+def test_create_product():
+    mock_service = AsyncMock(spec=ProductService)
+    mock_service.create_product.return_value = {"message": "Success", "id": "1", "data": {"id": "1", "name": "Klavye"}}
+    _override_service(mock_service)
+    new_product = {"name": "Klavye", "price": 100, "category": "Elektronik", "stock": 10}
+    response = client.post("/products", json=new_product, headers={"X-User-Role": "admin"})
+    assert response.status_code == 201
+    assert "id" in response.json()
+def test_delete_product():
+    mock_service = AsyncMock(spec=ProductService)
+    mock_service.delete_product.return_value = {"message": "ÃœrÃ¼n silindi"}
+    _override_service(mock_service)
+    response = client.delete("/products/1", headers={"X-User-Role": "admin"})
+    assert response.status_code == 200
+def test_update_product():
+    mock_service = AsyncMock(spec=ProductService)
+    mock_service.update_product.return_value = {"message": "Success", "id": "1", "data": {"id": "1", "name": "Yeni"}}
+    _override_service(mock_service)
+    up_data = {"name": "Yeni", "price": 20, "category": "Elektronik", "stock": 1}
+    response = client.put("/products/1", json=up_data, headers={"X-User-Role": "admin"})
+    assert response.status_code == 200
+    assert response.json()["data"]["name"] == "Yeni"
+
+----- product-service/requirements.txt -----
+
+# â”€â”€â”€â”€ Framework â”€â”€â”€â”€
+fastapi>=0.110.0,<1.0.0
+uvicorn>=0.27.0,<1.0.0
+pydantic>=2.6.0,<3.0.0
+
+# â”€â”€â”€â”€ Database â”€â”€â”€â”€
+motor>=3.3.1,<3.7.0
+pymongo>=4.6.0,<4.8.0
+
+# â”€â”€â”€â”€ Testing â”€â”€â”€â”€
+pytest>=8.0.0,<9.0.0
+httpx>=0.27.0,<1.0.0
+
+# â”€â”€â”€â”€ Performance â”€â”€â”€â”€
+locust>=2.24.0,<3.0.0
+
+# â”€â”€â”€â”€ Monitoring â”€â”€â”€â”€
+prometheus-client>=0.20.0,<1.0.0
+prometheus-fastapi-instrumentator>=7.0.0,<8.0.0
+
+# â”€â”€â”€â”€ Logging â”€â”€â”€â”€
+python-json-logger>=2.0.0,<3.0.0
+
+# â”€â”€â”€â”€ Environment â”€â”€â”€â”€
+python-dotenv>=1.0.0
+PyYAML>=6.0
+
+
+----- prometheus.yml -----
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:8000']
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'auth-service'
+    static_configs:
+      - targets: ['auth-service:8000']
+
+  - job_name: 'user-service'
+    static_configs:
+      - targets: ['user-service:8002'] 
+
+  - job_name: 'product-service'
+    static_configs:
+      - targets: ['product-service:8003']
+
+----- requirements.txt -----
+
+# â”€â”€â”€â”€ Shared Library â”€â”€â”€â”€
+pydantic>=2.6.0,<3.0.0
+pydantic-settings>=2.1.0,<3.0.0
+fastapi>=0.110.0,<1.0.0
+
+
+# â”€â”€â”€â”€ Database & Cache â”€â”€â”€â”€
+motor>=3.3.1,<3.7.0
+pymongo>=4.6.0,<4.8.0
+redis>=5.0.0,<6.0.0
+
+# â”€â”€â”€â”€ Auth â”€â”€â”€â”€
+passlib[bcrypt]>=1.7.4,<2.0.0
+bcrypt>=3.2.0,<4.1.0
+pyjwt>=2.8.0,<3.0.0
+
+# â”€â”€â”€â”€ Testing â”€â”€â”€â”€
+pytest>=8.0.0,<9.0.0
+pytest-asyncio>=0.23.0,<1.0.0
+pytest-cov>=4.1.0,<5.0.0
+httpx>=0.27.0,<1.0.0
+
+# â”€â”€â”€â”€ Monitoring â”€â”€â”€â”€
+prometheus-client>=0.20.0,<1.0.0
+prometheus-fastapi-instrumentator>=7.0.0,<8.0.0
+
+
+----- shared/__init__.py -----
+
+"""shared/ â€” TÃ¼m mikroservisler iÃ§in ortak altyapÄ± kÃ¼tÃ¼phanesi"""
+from shared.exceptions import (
+    AppException,
+    NotFoundException,
+    UnauthorizedException,
+    ConflictException,
+    ServiceUnavailableException,
+    app_exception_handler,
+)
+from shared.hateoas import HateoasLink, HateoasBuilder
+from shared.base_repository import AbstractRepository, MongoRepository
+from shared.base_service import AbstractService
+from shared.middleware import LoggingMiddleware
+from shared.metrics import setup_metrics
+from shared.config import AppConfig, load_config
+__all__ = [
+    "AppException",
+    "NotFoundException",
+    "UnauthorizedException",
+    "ConflictException",
+    "ServiceUnavailableException",
+    "app_exception_handler",
+    "HateoasLink",
+    "HateoasBuilder",
+    "AbstractRepository",
+    "MongoRepository",
+    "AbstractService",
+    "LoggingMiddleware",
+    "setup_metrics",
+    "AppConfig",
+    "load_config",
+]
+
+----- shared/base_repository.py -----
+
+"""Veri eriÅŸim katmanÄ± â€” Abstract Repository ve MongoDB """
+from abc import ABC, abstractmethod
+from typing import TypeVar, Generic
+from pydantic import BaseModel
+from motor.motor_asyncio import AsyncIOMotorCollection
+T = TypeVar("T", bound=BaseModel)
+class AbstractRepository(ABC, Generic[T]):
+    """Soyut Repository â€” tÃ¼m veri eriÅŸim sÄ±nÄ±flarÄ±nÄ±n arayÃ¼zÃ¼."""
+    @abstractmethod
+    async def find_by_id(self, id: str) -> T | None:
+        """Verilen ID'ye sahip kaydÄ± getirir. Bulunamazsa None dÃ¶ner."""  
+        ...
+    @abstractmethod
+    async def find_all(self, skip: int = 0, limit: int = 20) -> list[T]:
+        """KayÄ±tlarÄ± sayfalÄ± ÅŸekilde listeler. skip: atlanacak, limit: max kayÄ±t."""  
+        ...
+    @abstractmethod
+    async def count(self) -> int:
+        """Koleksiyondaki toplam kayÄ±t sayÄ±sÄ±nÄ± dÃ¶ner."""  
+        ...
+    @abstractmethod
+    async def create(self, entity: T) -> T:
+        """Yeni kayÄ±t oluÅŸturur ve oluÅŸturulan kaydÄ± dÃ¶ner."""  
+        ...
+    @abstractmethod
+    async def update(self, id: str, entity: T) -> T | None:
+        """Mevcut kaydÄ± gÃ¼nceller. KayÄ±t yoksa None dÃ¶ner."""  
+        ...
+    @abstractmethod
+    async def delete(self, id: str) -> bool:
+        """KaydÄ± siler. BaÅŸarÄ±lÄ±ysa True, bulunamazsa False dÃ¶ner."""  
+        ...
+class MongoRepository(AbstractRepository[T]):
+    """MongoDB implementasyonu â€” Motor async driver."""
+    def __init__(self, collection: AsyncIOMotorCollection, model_class: type[T]):
+        """Koleksiyon baÄŸlantÄ±sÄ± ve model sÄ±nÄ±fÄ± ile baÅŸlatÄ±r."""
+        self._collection = collection
+        self._model_class = model_class
+    async def find_by_id(self, id: str) -> T | None:
+        """MongoDB'den _id ile tek kayÄ±t sorgular."""
+        doc = await self._collection.find_one({"_id": id})
+        return self._model_class(**doc) if doc else None
+    async def find_all(self, skip: int = 0, limit: int = 20) -> list[T]:
+        """TÃ¼m kayÄ±tlarÄ± sayfalayarak getirir."""
+        cursor = self._collection.find().skip(skip).limit(limit)
+        return [self._model_class(**doc) async for doc in cursor]
+    async def count(self) -> int:
+        """Koleksiyondaki toplam dokÃ¼man sayÄ±sÄ±nÄ± dÃ¶ner."""
+        return await self._collection.count_documents({})
+    async def create(self, entity: T) -> T:
+        """Yeni dokÃ¼man ekler ve eklenen entity'yi dÃ¶ner."""
+        doc = entity.model_dump(by_alias=True)
+        await self._collection.insert_one(doc)
+        return entity
+    async def update(self, id: str, entity: T) -> T | None:
+        """Mevcut dokÃ¼manÄ± gÃ¼nceller. DeÄŸiÅŸiklik yoksa None dÃ¶ner."""
+        result = await self._collection.update_one(
+            {"_id": id}, {"$set": entity.model_dump(exclude={"id"}, by_alias=True)}
+        )
+        return entity if result.modified_count else None
+    async def delete(self, id: str) -> bool:
+        """DokÃ¼manÄ± siler. Silindiyse True, bulunamadÄ±ysa False dÃ¶ner."""
+        result = await self._collection.delete_one({"_id": id})
+        return result.deleted_count > 0
+
+----- shared/base_service.py -----
+
+"""Ä°ÅŸ mantÄ±ÄŸÄ± katmanÄ± â€” Abstract Service arayÃ¼zÃ¼"""
+from abc import ABC, abstractmethod
+from typing import TypeVar, Generic
+from pydantic import BaseModel
+from shared.base_repository import AbstractRepository
+T = TypeVar("T", bound=BaseModel)
+class AbstractService(ABC ,Generic[T]):
+    """ Soyut Service â€” iÅŸ mantÄ±ÄŸÄ± katmanÄ± arayÃ¼zÃ¼. """
+    def __init__(self, repository: AbstractRepository[T]):
+        """ Servisi baÄŸlÄ± oldÄ±ÄŸu Repository ile baÅŸlatÄ±r """
+        self._repository = repository
+    @abstractmethod
+    async def get_all(self, page: int, per_page: int) -> tuple[list[T], int]:
+        """ KayÄ±tlarÄ± sayfalÄ± ÅŸekilde dÃ¶ndÃ¼r (items, total) olarak dÃ¶ner """
+        ...
+    @abstractmethod
+    async def get_by_id(self, id: str) -> T:
+        """ Tek bir kaydÄ± id ile dÃ¶ndÃ¼rÃ¼r """
+        ...
+
+----- shared/exceptions.py -----
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+"""Sistem hata yÃ¶netim merkezi """
+class AppException(Exception):
+    """
+    Sistemdeki tÃ¼m Ã¶zel hatalarÄ±n miras alacaÄŸÄ± temel sÄ±nÄ±f.
+    FastAPI hata yakalarken sadece burayÄ± kullanacak.
+    """
+    def __init__(self, status_code: int, detail: str, error_code: str):
+        self.status_code = status_code                          
+        self.detail = detail                                            
+        self.error_code = error_code                                                                
+        super().__init__(self.detail)
+class NotFoundException(AppException):
+    """AranÄ±lan kaynak bulunamadÄ±ÄŸÄ±nda 404 dÃ¶ner."""
+    def __init__(self, resource_name: str, resource_id: str):
+        super().__init__(
+            status_code=404,
+            detail=f"{resource_name} bulunamadÄ±: '{resource_id}'",
+            error_code="RESOURCE_NOT_FOUND"
+        )
+class UnauthorizedException(AppException):
+    """Yetkisiz eriÅŸim denemelerinde (Token yok/geÃ§ersiz) 401 dÃ¶ner."""
+    def __init__(self, detail: str = "GeÃ§ersiz veya sÃ¼resi dolmuÅŸ token tespit edildi."):
+        super().__init__(
+            status_code=401,
+            detail=detail,
+            error_code="UNAUTHORIZED"
+        )
+class ConflictException(AppException):
+    """Zaten var olan veriyi tekrar oluÅŸturma (Ã–rn: aynÄ± email) denemesinde 409 dÃ¶ner."""
+    def __init__(self, detail: str):
+        super().__init__(
+            status_code=409,
+            detail=detail,
+            error_code="CONFLICT"
+        )
+class ValidationException(AppException):
+    """Gelen verinin doÄŸrulama kurallarÄ±na uymamasÄ± durumunda 422 dÃ¶ner."""
+    def __init__(self, detail: str):
+        super().__init__(
+            status_code=422,
+            detail=detail,
+            error_code="VALIDATION_ERROR"
+        )
+class ForbiddenException(AppException):
+    """KullanÄ±cÄ±nÄ±n belirli bir kaynaÄŸa/iÅŸleme eriÅŸim yetkisi olmadÄ±ÄŸÄ±nda 403 dÃ¶ner."""
+    def __init__(self, detail: str = "Bu kaynak/iÅŸlem iÃ§in yetkiniz bulunmamaktadÄ±r."):
+        super().__init__(
+            status_code=403,
+            detail=detail,
+            error_code="FORBIDDEN"
+        )
+class ServiceUnavailableException(AppException):
+    """Dispatcher'Ä±n hedef mikroservise baÄŸlanamadÄ±ÄŸÄ± durumda 503 dÃ¶ner."""
+    def __init__(self, service_name: str):
+        super().__init__(
+            status_code=503,
+            detail=f"{service_name} servisine ÅŸu an ulaÅŸÄ±lamÄ±yor. LÃ¼tfen daha sonra tekrar deneyin.",
+            error_code="SERVICE_UNAVAILABLE"
+        )
+async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+    """ FastAPI exception handler - HATEOAS uyumlu hata yanÄ±tÄ± """
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": {
+                "code": exc.error_code,
+                "detail": exc.detail,
+            },
+            "_links": {
+                "self": {"href": str(request.url), "method": request.method},
+                "docs": {"href": "/docs"},
+            },
+        },
+    )
+
+----- shared/hateoas.py -----
+
+""" RMM Seviye - 3 HATEOAS uyumlu response oluÅŸturma """
+from typing import Any, Callable, Optional
+class HateoasLink:
+    """Tek bir HATEOAS linkini temsil eder."""
+    def __init__(self, href: str, method: str = "GET", rel: str | None = None):
+        self.href = href
+        self.method = method
+        self.rel = rel
+    def to_dict(self) -> dict[str, str]:
+        result = {"href": self.href, "method": self.method}
+        if self.rel:
+            result["rel"] = self.rel
+        return result
+class HateoasBuilder:
+    """HATEOAS ile uyumlu response oluÅŸturur (OCP uyumlu)."""
+    def __init__(self, base_url: str = "/api/v1"):
+        self.base_url = base_url
+    def build_response(
+        self, data: dict[str, Any], links: dict[str, HateoasLink]
+    ) -> dict[str, Any]:
+        """Tek kaynak iÃ§in HATEOAS response Ã¼retir."""
+        return {
+            **data,
+            "_links": {name: link.to_dict() for name, link in links.items()},
+        }
+    def collection_response(
+        self,
+        items: list,
+        resource_name: str,
+        page: int = 1,
+        per_page: int = 20,
+        total: int = 0,
+        item_serializer: Optional[Callable] = None,
+    ) -> dict[str, Any]:
+        """
+        Koleksiyon iÃ§in paginated HATEOAS response Ã¼retir.
+        Args:
+            items: Pydantic model veya dict listesi.
+            resource_name: Kaynak adÄ± (URL'de kullanÄ±lÄ±r).
+            page: Mevcut sayfa.
+            per_page: Sayfa baÅŸÄ±na kayÄ±t.
+            total: Toplam kayÄ±t sayÄ±sÄ±.
+            item_serializer: Her Ã¶ÄŸeyi dict'e Ã§eviren strateji fonksiyonu (Strategy Pattern).
+                             None ise Ã¶ÄŸeler olduÄŸu gibi kullanÄ±lÄ±r.
+        """
+        total_pages = (total + per_page - 1) // per_page if per_page > 0 else 0
+        base = f"{self.base_url}/{resource_name}"
+        links: dict[str, HateoasLink] = {
+            "self": HateoasLink(href=f"{base}?page={page}&per_page={per_page}"),
+            "create": HateoasLink(href=base, method="POST"),
+        }
+        if page > 1:
+            links["prev"] = HateoasLink(
+                href=f"{base}?page={page - 1}&per_page={per_page}"
+            )
+        if page < total_pages:
+            links["next"] = HateoasLink(
+                href=f"{base}?page={page + 1}&per_page={per_page}"
+            )
+        if item_serializer:
+            serialized_items = [item_serializer(item) for item in items]
+        else:
+            serialized_items = items
+        return {
+            "data": serialized_items,
+            "meta": {"page": page, "per_page": per_page, "total": total},
+            "_links": {k: v.to_dict() for k, v in links.items()},
+        }
+
+----- shared/logging.py -----
+
+import logging
+import json
+import os
+from logging.handlers import RotatingFileHandler
+class JsonFormatter(logging.Formatter):
+    """
+    Log kayÄ±tlarÄ±nÄ± JSON formatÄ±na dÃ¶nÃ¼ÅŸtÃ¼ren Ã¶zel bir formatter.
+    Belirtilen alanlarÄ± (timestamp, service_name, log_level, message) ve
+    ekstra olarak geÃ§irilen tÃ¼m alanlarÄ± JSON Ã§Ä±ktÄ±sÄ±na dahil eder.
+    """
+    def format(self, record):
+        log_record = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "service_name": getattr(record, "service_name", "unknown_service"),
+            "log_level": record.levelname,
+            "message": record.getMessage(),
+        }
+        for key, value in record.__dict__.items():
+            if key not in log_record and not key.startswith('_') and key not in [
+                'name', 'levelname', 'pathname', 'lineno', 'funcName', 'created',
+                'msecs', 'relativeCreated', 'thread', 'threadName', 'processName',
+                'process', 'exc_info', 'exc_text', 'stack_info', 'filename',
+                'module', 'msg', 'args', 'asctime', 'levelno'
+            ]:
+                log_record[key] = value
+        if record.exc_info:
+            log_record["exc_info"] = self.formatException(record.exc_info)
+        if record.stack_info:
+            log_record["stack_info"] = self.formatStack(record.stack_info)
+        return json.dumps(log_record)
+def setup_logging(service_name: str, log_level: str = "INFO"):
+    """
+    Belirtilen servis adÄ± iÃ§in yapÄ±landÄ±rÄ±lmÄ±ÅŸ bir logger dÃ¶ndÃ¼rÃ¼r.
+    Loglar hem konsola hem de servise Ã¶zel bir dosyaya JSON formatÄ±nda yazÄ±lÄ±r.
+    """
+    logger = logging.getLogger(service_name)
+    logger.setLevel(log_level)
+    if not logger.handlers:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(JsonFormatter())
+        logger.addHandler(console_handler)
+        log_dir = "logs"
+        os.makedirs(log_dir, exist_ok=True)                        
+        file_handler = RotatingFileHandler(os.path.join(log_dir, f"{service_name}.log"), maxBytes=10 * 1024 * 1024, backupCount=5)                
+        file_handler.setFormatter(JsonFormatter())
+        logger.addHandler(file_handler)
+    return logging.LoggerAdapter(logger, {"service_name": service_name})
+
+----- shared/metrics.py -----
+
+
+----- shared/middleware.py -----
+
+"""Ortak middleware â€” Ä°stek loglama ve sÃ¼re Ã¶lÃ§Ã¼mÃ¼"""
+import time
+from logging import LoggerAdapter
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
+class LoggingMiddleware(BaseHTTPMiddleware):
+    """
+    Gelen her HTTP isteÄŸini yapÄ±landÄ±rÄ±lmÄ±ÅŸ bir logger kullanarak loglar.
+    Ä°stek baÅŸlangÄ±cÄ±nÄ±, bitiÅŸini ve olasÄ± hatalarÄ± kaydeder.
+    """
+    def __init__(self, app: ASGIApp, logger: LoggerAdapter):
+        super().__init__(app)
+        self.logger = logger
+    async def dispatch(self, request: Request, call_next):
+        """Ä°steÄŸi yakalar, sÃ¼reyi Ã¶lÃ§er, loglar ve yanÄ±tÄ± dÃ¶ner."""
+        start_time = time.perf_counter()
+        self.logger.info(
+            "Request started",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "request_id": request.headers.get("X-Request-ID"),              
+                "user_id": request.headers.get("X-User-ID"),                               
+            }
+        )
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            process_time_ms = (time.perf_counter() - start_time) * 1000
+            status_code = 500                                                  
+            self.logger.exception(                                                        
+                "Request failed with unhandled exception",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": status_code,
+                    "process_time_ms": f"{process_time_ms:.2f}",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                    "request_id": request.headers.get("X-Request-ID"),
+                    "user_id": request.headers.get("X-User-ID"),
+                }
+            )
+            raise exc                           
+        process_time_ms = (time.perf_counter() - start_time) * 1000
+        status_code = response.status_code
+        log_level_func = self.logger.info
+        if 400 <= status_code < 500:
+            log_level_func = self.logger.warning
+        elif status_code >= 500:
+            log_level_func = self.logger.error
+        log_level_func(
+            "Request finished",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": status_code,
+                "process_time_ms": f"{process_time_ms:.2f}",
+                "request_id": request.headers.get("X-Request-ID"),
+                "user_id": request.headers.get("X-User-ID"),
+            }
+        )
+        response.headers["X-Process-Time"] = f"{process_time_ms:.2f}ms"
+        return response
+
+----- shared/security.py -----
+
+"""Yetkilendirme ve rol kontrolÃ¼ iÃ§in yardÄ±mcÄ± fonksiyonlar."""
+from fastapi import Header, Depends
+from typing import List
+from shared.exceptions import ForbiddenException
+async def get_user_role(x_user_role: str = Header(..., alias="X-User-Role")) -> str:
+    """
+    Gelen isteÄŸin baÅŸlÄ±klarÄ±ndan (X-User-Role) kullanÄ±cÄ±nÄ±n rolÃ¼nÃ¼ Ã§eker.
+    Dispatcher'Ä±n token'Ä± doÄŸrulayÄ±p bu baÅŸlÄ±ÄŸÄ± eklediÄŸi varsayÄ±lÄ±r.
+    """
+    return x_user_role
+class RoleChecker:
+    """FastAPI baÄŸÄ±mlÄ±lÄ±ÄŸÄ± olarak kullanÄ±lacak rol kontrol sÄ±nÄ±fÄ±."""
+    def __init__(self, allowed_roles: List[str]):
+        self.allowed_roles = allowed_roles
+    async def __call__(self, user_role: str = Depends(get_user_role)):
+        if user_role not in self.allowed_roles:
+            raise ForbiddenException(f"Bu iÅŸlem iÃ§in yetkiniz yok. Gerekli roller: {', '.join(self.allowed_roles)}")
+
+----- shared/tests/__init__.py -----
+
+
+----- shared/tests/test_base_repository.py -----
+
+""" Repository KatmanÄ± Testleri"""
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+from shared.base_repository import AbstractRepository, MongoRepository
+from pydantic import BaseModel
+class FakeUser(BaseModel):
+    id: str
+    name: str
+def test_abstract_repository_cannot_be_instantiated():
+    """ Soyut sÄ±nÄ±fÄ± doÄŸrudan oluÅŸturulamamalÄ±"""
+    with pytest.raises(TypeError):
+        AbstractRepository()
+@pytest.fixture
+def mock_collection():
+    """ Sahte MongoDB collection oluÅŸturur"""
+    collection = MagicMock()
+    collection.find_one = AsyncMock()
+    collection.insert_one = AsyncMock()
+    collection.update_one = AsyncMock()
+    collection.delete_one = AsyncMock()
+    collection.count_documents = AsyncMock()
+    return collection
+@pytest.fixture
+def repo(mock_collection):
+    """ Test iÃ§in MongoRepository Ã¶rneÄŸi """
+    return MongoRepository(collection=mock_collection, model_class=FakeUser)
+@pytest.mark.asyncio
+async def test_find_by_id_returns_model_when_found(repo, mock_collection):
+    """ KayÄ±t bulunduÄŸunda Pydantic modeli dÃ¶ndÃ¼rmeli """
+    mock_collection.find_one.return_value = {"_id": "1", "id": "1", "name": "Boran"}
+    result = await repo.find_by_id("1")
+    assert result is not None
+    assert result.name == "Boran"
+@pytest.mark.asyncio
+async def test_find_by_id_returns_none_when_not_found(repo, mock_collection):
+    """KayÄ±t bulunamadÄ±ÄŸÄ±nda None dÃ¶ndÃ¼rmeli."""
+    mock_collection.find_one.return_value = None
+    result = await repo.find_by_id("999")
+    assert result is None
+@pytest.mark.asyncio
+async def test_create_calls_insert_one(repo, mock_collection):
+    """create() Ã§aÄŸrÄ±ldÄ±ÄŸÄ±nda MongoDB insert_one tetiklenmeli."""
+    user = FakeUser(id="1", name="Boran")
+    result = await repo.create(user)
+    mock_collection.insert_one.assert_called_once()
+    assert result.name == "Boran"
+@pytest.mark.asyncio
+async def test_delete_returns_true_when_deleted(repo, mock_collection):
+    """Silme baÅŸarÄ±lÄ±ysa True dÃ¶nmeli."""
+    mock_collection.delete_one.return_value = MagicMock(deleted_count=1)
+    result = await repo.delete("1")
+    assert result is True
+@pytest.mark.asyncio
+async def test_delete_returns_false_when_not_found(repo, mock_collection):
+    """Silinecek kayÄ±t yoksa False dÃ¶nmeli."""
+    mock_collection.delete_one.return_value = MagicMock(deleted_count=0)
+    result = await repo.delete("999")
+    assert result is False
+@pytest.mark.asyncio
+async def test_count_returns_document_count(repo, mock_collection):
+    """count() doÄŸru sayÄ±yÄ± dÃ¶ndÃ¼rmeli."""
+    mock_collection.count_documents.return_value = 42
+    result = await repo.count()
+    assert result == 42
+
+----- shared/tests/test_base_service.py -----
+
+""" Base Service KatmanÄ± Testleri"""
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+from pydantic import BaseModel
+from shared.base_service import AbstractService
+from shared.base_repository import AbstractRepository
+class FakeUser(BaseModel):
+    id: str
+    name: str
+def test_abstract_service_cannot_be_instantiated():
+    """ Soyut sÄ±nÄ±fÄ± doÄŸrudan oluÅŸmamalÄ± """
+    with pytest.raises(TypeError):
+        AbstractService(repository=MagicMock())
+class ConcreteService(AbstractService):
+    """Test iÃ§in AbstractService'i implement eden somut sÄ±nÄ±f."""
+    async def get_by_id(self, id: str):
+        return await self._repository.find_by_id(id)
+    async def get_all(self, page: int, per_page: int):
+        skip = (page - 1) * per_page
+        items = await self._repository.find_all(skip=skip, limit=per_page)
+        total = await self._repository.count()
+        return items, total
+@pytest.fixture
+def mock_repo():
+    """Sahte repository oluÅŸturur."""
+    repo = MagicMock()
+    repo.find_by_id = AsyncMock()
+    repo.find_all = AsyncMock()
+    repo.count = AsyncMock()
+    return repo
+@pytest.fixture
+def service(mock_repo):
+    """Test iÃ§in somut service Ã¶rneÄŸi."""
+    return ConcreteService(repository=mock_repo)
+@pytest.mark.asyncio
+async def test_service_stores_repository(mock_repo):
+    """Service, verilen repository'yi saklamalÄ±."""
+    svc = ConcreteService(repository=mock_repo)
+    assert svc._repository is mock_repo
+@pytest.mark.asyncio
+async def test_get_by_id_delegates_to_repository(service, mock_repo):
+    """get_by_id Ã§aÄŸrÄ±sÄ± repository'ye aktarÄ±lmalÄ±."""
+    mock_repo.find_by_id.return_value = FakeUser(id="1", name="Boran")
+    result = await service.get_by_id("1")
+    mock_repo.find_by_id.assert_called_once_with("1")
+    assert result.name == "Boran"
+@pytest.mark.asyncio
+async def test_get_all_calculates_skip_correctly(service, mock_repo):
+    """Sayfa 2, per_page 10 ise skip=10 olmalÄ±."""
+    mock_repo.find_all.return_value = []
+    mock_repo.count.return_value = 0
+    await service.get_all(page=2, per_page=10)
+    mock_repo.find_all.assert_called_once_with(skip=10, limit=10)
+
+----- shared/tests/test_exceptions.py -----
+
+"""  Hata YÃ¶netimi Testleri """
+import pytest
+from fastapi import Request
+from shared.exceptions import (
+    AppException, 
+    NotFoundException, 
+    UnauthorizedException, 
+    ConflictException, 
+    ServiceUnavailableException, 
+    app_exception_handler,
+)
+def tests_not_found_exception():
+    """ NotFoundException sÄ±nÄ±fÄ±nÄ± test eder """
+    exc = NotFoundException("KullanÄ±cÄ±", "123")
+    assert exc.status_code == 404
+    assert exc.detail == "KullanÄ±cÄ± bulunamadÄ±: '123'"
+    assert exc.error_code == "RESOURCE_NOT_FOUND"
+def tests_unauthorized_exception():
+    """ UnauthorizedException sÄ±nÄ±fÄ±nÄ± test eder """
+    exc = UnauthorizedException()
+    assert exc.status_code == 401
+    assert exc.detail == "GeÃ§ersiz veya sÃ¼resi dolmuÅŸ token tespit edildi."
+    assert exc.error_code == "UNAUTHORIZED"
+def tests_conflict_exception():
+    """ ConflictException sÄ±nÄ±fÄ±nÄ± test eder """
+    exc = ConflictException("KullanÄ±cÄ± zaten mevcut")
+    assert exc.status_code == 409
+    assert exc.detail == "KullanÄ±cÄ± zaten mevcut"
+    assert exc.error_code == "CONFLICT"
+def tests_service_unavailable_exception():
+    """ ServiceUnavailableException sÄ±nÄ±fÄ±nÄ± test eder """
+    exc = ServiceUnavailableException("KullanÄ±cÄ± Servisi")
+    assert exc.status_code == 503
+    assert exc.detail == "KullanÄ±cÄ± Servisi servisine ÅŸu an ulaÅŸÄ±lamÄ±yor. LÃ¼tfen daha sonra tekrar deneyin."
+    assert exc.error_code == "SERVICE_UNAVAILABLE"
+@pytest.mark.asyncio
+async def tests_app_exception_handler():
+    """ app_exception_handler fonksiyonunu test eder """
+    scope = {"type": "http", "method": "GET", "path": "/users/123", "query_string": b"", "headers": []}
+    request = Request(scope)
+    exc = NotFoundException("KullanÄ±cÄ±", "123")
+    response = await app_exception_handler(request, exc)
+    assert response.status_code == 404
+
+----- shared/tests/test_hateoas.py -----
+
+""" HATEOAS Link Builder Testleri """
+from shared.hateoas import HateoasLink, HateoasBuilder
+def test_hateoas_link_default_method_is_get():
+    """ Link oluÅŸturulduÄŸunda varsayÄ±lan metod GET olmalÄ± """
+    link = HateoasLink(href="/api/v1/users/1")
+    assert link.href == "/api/v1/users/1"
+    assert link.method == "GET"
+def test_hateoas_link_custom_method():
+    """ FarklÄ± HTTP method belirtiÄŸinde doÄŸru dÃ¶nmeli """
+    link = HateoasLink(href="/api/v1/users", method="POST")
+    assert link.method == "POST"
+def test_hateoas_link_to_dict():
+    """ to_dict() metodu href ve method iÃ§eren dict dÃ¶ndÃ¼rmeli """
+    link = HateoasLink(href="/api/v1/users", method="DELETE")
+    result = link.to_dict()
+    assert result == {"href": "/api/v1/users", "method": "DELETE"}
+def test_build_response_contains_links():
+    """Tek kaynak yanÄ±tÄ±nda _links anahtarÄ± bulunmalÄ±."""
+    builder = HateoasBuilder(base_url="/api/v1")
+    response = builder.build_response(
+        data={"id": "1", "name": "Boran"},
+        links={
+            "self": HateoasLink(href="/api/v1/users/1"),
+        }
+    )
+    assert "_links" in response
+    assert response["_links"]["self"]["href"] == "/api/v1/users/1"
+    assert response["name"] == "Boran"
+def test_collection_response_has_pagination_meta():
+    """Koleksiyon yanÄ±tÄ±nda meta (page, total) bilgisi olmalÄ±."""
+    builder = HateoasBuilder(base_url="/api/v1")
+    response = builder.collection_response(
+        items=[{"id": "1"}, {"id": "2"}],
+        resource_name="users",
+        page=1,
+        per_page=10,
+        total=25,
+    )
+    assert response["meta"]["page"] == 1
+    assert response["meta"]["total"] == 25
+    assert len(response["data"]) == 2
+def test_collection_response_has_next_link_when_more_pages():
+    """Sonraki sayfa varsa _links iÃ§inde 'next' linki olmalÄ±."""
+    builder = HateoasBuilder(base_url="/api/v1")
+    response = builder.collection_response(
+        items=[], resource_name="products", page=1, per_page=10, total=30
+    )
+    assert "next" in response["_links"]
+def test_collection_response_has_prev_link_on_page_two():
+    """Sayfa 2'deyken _links iÃ§inde 'prev' linki olmalÄ±."""
+    builder = HateoasBuilder(base_url="/api/v1")
+    response = builder.collection_response(
+        items=[], resource_name="products", page=2, per_page=10, total=30
+    )
+    assert "prev" in response["_links"]
+def test_collection_response_no_prev_on_first_page():
+    """Ä°lk sayfada 'prev' linki olmamalÄ±."""
+    builder = HateoasBuilder(base_url="/api/v1")
+    response = builder.collection_response(
+        items=[], resource_name="products", page=1, per_page=10, total=30
+    )
+    assert "prev" not in response["_links"]
+
+----- shared/tests/test_metrics.py -----
+
+""" Prometheus Metrics Testleri """
+from unittest.mock import MagicMock, patch
+from fastapi import FastAPI
+from shared.metrics import setup_metrics, REQUEST_COUNT, REQUEST_LATENCY
+def test_request_count_metric_exists():
+    """REQUEST_COUNT metriÄŸi oluÅŸturulmuÅŸ olmalÄ±."""
+    assert REQUEST_COUNT is not None
+def test_request_latency_metric_exists():
+    """REQUEST_LATENCY histogramÄ± oluÅŸturulmuÅŸ olmalÄ±."""
+    assert REQUEST_LATENCY is not None
+def test_setup_metrics_adds_metrics_endpoint():
+    """/metrics endpoint'i uygulama baÅŸladÄ±ÄŸÄ±nda eklenmiÅŸ olmalÄ±."""
+    app = FastAPI()
+    setup_metrics(app, service_name="test-service")
+    routes = [r.path for r in app.routes]
+    assert "/metrics" in routes
+
+----- shared/tests/test_middleware.py -----
+
+""" Request Logging Middleware Testleri"""
+import pytest
+from unittest.mock import MagicMock
+from starlette.testclient import TestClient
+from fastapi import FastAPI
+from shared.middleware import LoggingMiddleware
+@pytest.fixture
+def mock_logger():
+    return MagicMock()
+@pytest.fixture
+def app_with_middleware(mock_logger):
+    """Middleware eklenmiÅŸ test oluÅŸturur."""
+    app = FastAPI()
+    app.add_middleware(LoggingMiddleware, logger=mock_logger)
+    @app.get("/test")
+    async def test_endpoint():
+        return {"status": "ok"}
+    return app
+@pytest.fixture
+def client(app_with_middleware):
+    """ Test istemcisi """
+    return TestClient(app_with_middleware)
+def test_reponse_contains_x_time_header(client):
+    """ YanÄ±tta X-Process-Time olmalÄ± """
+    reponse = client.get("/test")
+    assert "X-Process-Time" in reponse.headers
+def test_x_response_time_format_is_milliseconds(client):
+    """X-Process-Time deÄŸeri 'ms' ile bitmeli."""
+    response = client.get("/test")
+    value = response.headers["X-Process-Time"]
+    assert value.endswith("ms")
+def test_middleware_does_not_block_response(client):
+    """Middleware, normal yanÄ±tÄ± engellememeli."""
+    response = client.get("/test")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+----- test_api.http -----
+
+
+@apiGateway = http://localhost:8000
+@authService = http://localhost:8001
+
+@productId = ae302f79-0d34-47a8-8ae0-5528778c212d
+@userId = cd69df6f-57d6-4a75-a7fc-041cab360b71
+
+
+POST {{authService}}/auth/register
+Content-Type: application/json
+
+{
+    "email": "admin@example.com",
+    "password": "password123"
+}
+
+POST {{authService}}/auth/login
+Content-Type: application/json
+
+{
+    "email": "test@example.com",
+    "password": "password123"
+}
+
+
+
+POST {{apiGateway}}/api/products
+Authorization: Bearer {{loginRequest.response.body.token}}
+Content-Type: application/json
+
+{
+  "name": "Mekanik Oyuncu Klavyesi",
+  "price": 1500.00,
+  "category": "Elektronik",
+  "stock": 50
+}
+
+GET {{apiGateway}}/api/products
+Authorization: Bearer {{loginRequest.response.body.token}}
+
+GET {{apiGateway}}/api/products/{{productId}}
+Authorization: Bearer {{loginRequest.response.body.token}}
+
+PUT {{apiGateway}}/api/products/{{productId}}
+Authorization: Bearer {{loginRequest.response.body.token}}
+Content-Type: application/json
+
+{
+  "name": "Mekanik Oyuncu Klavyesi - RGB",
+  "price": 1750.00,
+  "category": "Elektronik",
+  "stock": 45
+}
+
+DELETE {{apiGateway}}/api/products/{{productId}}
+Authorization: Bearer {{loginRequest.response.body.token}}
+
+
+
+GET {{apiGateway}}/api/users/me
+Authorization: Bearer {{loginRequest.response.body.token}}
+
+PUT {{apiGateway}}/api/users/me
+Authorization: Bearer {{loginRequest.response.body.token}}
+Content-Type: application/json
+
+{
+  "username": "boransert",
+  "full_name": "Boran Sert",
+  "bio": "API Gateway geliÅŸtiricisi"
+}
+
+
+----- user-service/Dockerfile -----
+
+FROM python:3.11-slim
+
+ENV PYTHONPATH=/app
+
+WORKDIR /app
+
+COPY user-service/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY shared /app/shared
+
+COPY user-service/. /app/
+
+EXPOSE 8002
+
+CMD ["uvicorn", "user_service_app.main:app", "--host", "0.0.0.0", "--port", "8002"]
+
+----- user-service/conftest.py -----
+
+"""
+conftest.py â€” Root dizini sys.path'e ekler.
+Shared kÃ¼tÃ¼phanesine eriÅŸim saÄŸlamak iÃ§in gereklidir.
+"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+----- user-service/requirements.txt -----
+
+# â”€â”€â”€â”€ Framework â”€â”€â”€â”€
+fastapi>=0.110.0,<1.0.0
+uvicorn>=0.27.0,<1.0.0
+pydantic[email]>=2.6.0,<3.0.0
+
+# â”€â”€â”€â”€ Database â”€â”€â”€â”€
+motor>=3.3.1,<3.7.0
+pymongo>=4.6.0,<4.8.0
+
+# â”€â”€â”€â”€ Monitoring â”€â”€â”€â”€
+prometheus-client>=0.20.0,<1.0.0
+prometheus-fastapi-instrumentator>=7.0.0,<8.0.0
+
+# â”€â”€â”€â”€ Testing â”€â”€â”€â”€
+pytest>=8.0.0,<9.0.0
+pytest-asyncio>=0.23.0,<1.0.0
+httpx>=0.27.0,<1.0.0
+
+# â”€â”€â”€â”€ Environment â”€â”€â”€â”€
+python-dotenv>=1.0.0
+PyYAML>=6.0
+
+
+----- user-service/user_service_app/__init__.py -----
+
+
+----- user-service/user_service_app/db.py -----
+
+from motor.motor_asyncio import AsyncIOMotorClient
+import os
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://mongo-user:27017")
+client = AsyncIOMotorClient(MONGO_URL)
+def get_database():
+    return client.user_db
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db = get_database()
+    collections = await db.list_collection_names()
+    if "users" not in collections:
+        await db.users.create_index("email", unique=True)
+        print("INFO: 'users' collection initialized automatically.")
+    yield
+    client.close()
+
+----- user-service/user_service_app/main.py -----
+
+from fastapi import FastAPI, Depends, Header
+from dotenv import load_dotenv
+load_dotenv()
+from user_service_app.services.user_service import UserService
+from user_service_app.models.user import UserUpdate
+from user_service_app.db import lifespan
+from user_service_app.repositories.user_repository import UserRepository
+from shared.exceptions import AppException, app_exception_handler
+from shared.logging import setup_logging
+from shared.middleware import LoggingMiddleware
+from shared.metrics import setup_metrics
+app = FastAPI(title="User Service", version="1.0.0", lifespan=lifespan)
+logger = setup_logging("user-service")
+app.add_exception_handler(AppException, app_exception_handler)
+setup_metrics(app, "user-service")
+app.add_middleware(LoggingMiddleware, logger=logger)
+def get_user_repository():
+    return UserRepository()
+def get_user_service(repo: UserRepository = Depends(get_user_repository)):
+    return UserService(repository=repo)
+async def get_user_id(x_user_id: str = Header(..., alias="X-User-ID")) -> str:
+    """Gateway'den gelen X-User-ID baÅŸlÄ±ÄŸÄ±nÄ± alÄ±r."""
+    return x_user_id
+async def get_user_email(x_user_email: str = Header(..., alias="X-User-Email")) -> str:
+    """Gateway'den gelen X-User-Email baÅŸlÄ±ÄŸÄ±nÄ± alÄ±r."""
+    return x_user_email
+@app.get("/me", summary="KullanÄ±cÄ±nÄ±n kendi profilini getirir")
+async def get_my_profile(
+    user_id: str = Depends(get_user_id),
+    user_email: str = Depends(get_user_email),
+    service: UserService = Depends(get_user_service),
+):
+    return await service.get_my_profile(user_id, user_email)
+@app.put("/me", summary="KullanÄ±cÄ±nÄ±n kendi profilini gÃ¼nceller")
+async def update_my_profile(
+    user_data: UserUpdate,
+    user_id: str = Depends(get_user_id),
+    user_email: str = Depends(get_user_email),
+    service: UserService = Depends(get_user_service),
+):
+    return await service.update_my_profile(user_id, user_email, user_data)
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "user-service"}
+
+----- user-service/user_service_app/models/__init__.py -----
+
+
+----- user-service/user_service_app/models/user.py -----
+
+from pydantic import BaseModel, Field, EmailStr
+from typing import Optional
+from uuid import uuid4
+class UserBase(BaseModel):
+    """KullanÄ±cÄ± profilinin gÃ¼ncellenebilir alanlarÄ±nÄ± tanÄ±mlar."""
+    username: Optional[str] = Field(None, min_length=3, max_length=50, description="KullanÄ±cÄ± adÄ±")
+    full_name: Optional[str] = Field(None, max_length=100, description="Tam ad")
+    bio: Optional[str] = Field(None, max_length=250, description="KullanÄ±cÄ± biyografisi")
+    profile_image_url: Optional[str] = Field(None, description="Profil fotoÄŸrafÄ± URL'si")
+class UserUpdate(BaseModel):
+    """Profil gÃ¼ncelleme isteÄŸi iÃ§in kullanÄ±lan model."""
+    username: Optional[str] = Field(None, min_length=3, max_length=50, description="KullanÄ±cÄ± adÄ±")
+    full_name: Optional[str] = Field(None, max_length=100, description="Tam ad")
+    bio: Optional[str] = Field(None, max_length=250, description="KullanÄ±cÄ± biyografisi")
+    profile_image_url: Optional[str] = Field(None, description="Profil fotoÄŸrafÄ± URL'si")
+class User(UserBase):
+    """VeritabanÄ±nda saklanan tam kullanÄ±cÄ± profili modeli."""
+    id: str = Field(
+        default_factory=lambda: str(uuid4()), 
+        alias="_id", 
+        description="KullanÄ±cÄ±nÄ±n benzersiz ID'si (Auth Service'ten gelen ID ile aynÄ±)"
+    )
+    email: EmailStr = Field(..., description="KullanÄ±cÄ±nÄ±n e-posta adresi (deÄŸiÅŸtirilemez)")
+    class Config:
+        populate_by_name = True
+
+----- user-service/user_service_app/repositories/__init__.py -----
+
+
+----- user-service/user_service_app/repositories/user_repository.py -----
+
+from user_service_app.models.user import User
+from shared.base_repository import MongoRepository
+from user_service_app.db import get_database
+class UserRepository(MongoRepository[User]):
+    """User veritabanÄ± iÅŸlemleri iÃ§in somut repository."""
+    def __init__(self):
+        database = get_database()
+        user_collection = database.get_collection("users")
+        super().__init__(collection=user_collection, model_class=User)
+
+----- user-service/user_service_app/services/__init__.py -----
+
+
+----- user-service/user_service_app/services/user_service.py -----
+
+from user_service_app.models.user import User, UserUpdate
+from shared.base_repository import AbstractRepository
+class UserService:
+    def __init__(self, repository: AbstractRepository[User]):
+        self._repository = repository
+    async def get_or_create_profile(self, user_id: str, user_email: str) -> User:
+        """
+        KullanÄ±cÄ± profilini ID ile arar. Bulamazsa, e-posta ve varsayÄ±lan
+        kullanÄ±cÄ± adÄ±yla yeni bir profil oluÅŸturur.
+        """
+        user = await self._repository.find_by_id(user_id)
+        if not user:
+            default_username = user_email.split('@')[0]
+            new_user_profile = User(id=user_id, email=user_email, username=default_username)
+            user = await self._repository.create(new_user_profile)
+        return user
+    async def get_my_profile(self, user_id: str, user_email: str) -> dict:
+        """Mevcut kullanÄ±cÄ±nÄ±n profilini getirir ve HATEOAS linkleri ekler."""
+        user = await self.get_or_create_profile(user_id, user_email)
+        user_dict = user.model_dump()
+        user_dict["_links"] = {
+            "self": {"href": "/users/me"},
+            "update": {"href": "/users/me", "method": "PUT"},
+        }
+        return user_dict
+    async def update_my_profile(self, user_id: str, user_email: str, user_data: UserUpdate) -> dict:
+        """Mevcut kullanÄ±cÄ±nÄ±n profilini gÃ¼nceller."""
+        existing_user = await self.get_or_create_profile(user_id, user_email)
+        update_data = user_data.model_dump(exclude_unset=True)
+        updated_user = existing_user.model_copy(update=update_data)
+        await self._repository.update(user_id, updated_user)
+        return {
+            "message": "Profil baÅŸarÄ±yla gÃ¼ncellendi",
+            "id": updated_user.id,
+            "_links": {"self": {"href": "/users/me"}},
+        }
+
+----- user-service/user_tests/__init__.py -----
+
+
+----- user-service/user_tests/test_user_api.py -----
+
+""" User Service API Testleri """
+from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock
+from user_service_app.main import app, get_user_service
+from user_service_app.services.user_service import UserService
+from user_service_app.models.user import User
+client = TestClient(app)
+def _override_service(mock_service):
+    """GerÃ§ek servisi mock ile deÄŸiÅŸtirir."""
+    app.dependency_overrides[get_user_service] = lambda: mock_service
+def test_get_my_profile():
+    """/users/me endpoint test."""
+    mock_service = AsyncMock(spec=UserService)
+    mock_user = User(username="test_user", email="test@example.com")
+    mock_service.get_my_profile.return_value = mock_user
+    _override_service(mock_service)
+    response = client.get(
+        "/users/me",
+        headers={"X-User-ID": mock_user.id, "X-User-Email": "test@example.com"}
+    )
+    assert response.status_code == 200
+    json_data = response.json()
+    assert json_data["email"] == "test@example.com"
+    assert json_data["username"] == "test_user"
+def test_update_my_profile():
+    """/users/me PUT endpoint test."""
+    mock_service = AsyncMock(spec=UserService)
+    mock_user = User(username="updated_user", email="test@example.com", bio="New bio")
+    mock_service.update_my_profile.return_value = mock_user
+    _override_service(mock_service)
+    response = client.put(
+        "/users/me",
+        json={"username": "updated_user", "bio": "New bio"},
+        headers={"X-User-ID": mock_user.id, "X-User-Email": "test@example.com"}
+    )
+    assert response.status_code == 200
+    json_data = response.json()
+    assert json_data["username"] == "updated_user"
+    assert json_data["bio"] == "New bio"

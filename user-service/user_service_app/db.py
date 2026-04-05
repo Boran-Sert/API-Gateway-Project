@@ -1,21 +1,17 @@
-import os
 from motor.motor_asyncio import AsyncIOMotorClient
+import os
 from contextlib import asynccontextmanager
-
-# Docker-compose'dan gelen environment variable'ı al
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-DB_NAME = "user_db"
-
-client: AsyncIOMotorClient = None
-
-def get_database() -> AsyncIOMotorClient:
-    """Veritabanı bağlantısını döndürür."""
-    return client[DB_NAME]
-
+from fastapi import FastAPI
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://mongo-user:27017")
+client = AsyncIOMotorClient(MONGO_URL)
+def get_database():
+    return client.user_db
 @asynccontextmanager
-async def lifespan(app):
-    """Uygulama yaşam döngüsü boyunca veritabanı bağlantısını yönetir."""
-    global client
-    client = AsyncIOMotorClient(MONGO_URL)
+async def lifespan(app: FastAPI):
+    db = get_database()
+    collections = await db.list_collection_names()
+    if "users" not in collections:
+        await db.users.create_index("email", unique=True)
+        print("INFO: 'users' collection initialized automatically.")
     yield
     client.close()

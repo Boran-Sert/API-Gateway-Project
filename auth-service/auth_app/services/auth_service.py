@@ -2,68 +2,81 @@ import uuid
 import jwt
 import json
 import datetime
-from auth_app.models.auth import RegisterRequest, LoginRequest, UserCredential, UserResponse
+from auth_app.models.auth import (
+    RegisterRequest,
+    LoginRequest,
+    UserCredential,
+    UserResponse,
+)
 from auth_app.repositories.mongo_repository import MongoUserRepository
 from auth_app.core.security import hash_password, verify_password
 from shared.exceptions import ConflictException, UnauthorizedException
-
+from shared.config import load_config
+config = load_config()
 class AuthService:
-    SECRET_KEY = "22042507012004" 
-
     def __init__(self, repository: MongoUserRepository, redis_client=None):
         self._repository = repository
         self._redis = redis_client
-
+        self.secret_key = config.jwt.secret_key
+        self.algorithm = config.jwt.algorithm
+        self.expire_seconds = config.jwt.expire_seconds
     async def register(self, request: RegisterRequest) -> UserResponse:
         """Yeni bir kullanıcı kaydeder."""
-        # 1. E-posta kontrolü
         existing_user = await self._repository.find_by_email(request.email)
         if existing_user:
             raise ConflictException("Bu e-posta zaten kullanılıyor")
-
-        # 2. Şifreyi hashle
         hashed_pw = hash_password(request.password)
-
-        # 3. Veritabanına kaydet
         user_id = str(uuid.uuid4())
+        assigned_role = "admin" if request.email.startswith("admin") else "user"
         user_cred = UserCredential(
-            _id=user_id, # Alias sayesinde _id olarak atanır
+            _id=user_id,                                     
             email=request.email,
-            hashed_password=hashed_pw
+            hashed_password=hashed_pw,
+            role=assigned_role,                        
         )
-        
         await self._repository.create(user_cred)
-
-        # 4. Response modeline dönüştürerek döndür
         return UserResponse(id=user_id, email=request.email)
-
     async def login(self, request: LoginRequest):
         """Kullanıcı girişini doğrular ve Redis'e oturum yazar."""
-        # 1. Kullanıcıyı bul
         user = await self._repository.find_by_email(request.email)
-
         if not user:
             raise UnauthorizedException("Geçersiz e-posta")
-        
-        # 2. Şifreyi doğrula
         if not verify_password(request.password, user.hashed_password):
             raise UnauthorizedException("Geçersiz şifre")
-
-        # 3. JWT üret
         payload = {
             "sub": user.email,
-            "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+            "user_id": str(user.id),
+            "role": user.role,
+            "exp": datetime.datetime.now(datetime.timezone.utc)
+            + datetime.timedelta(seconds=self.expire_seconds),
         }
-        token = jwt.encode(payload, self.SECRET_KEY, algorithm="HS256")
-        
-        # 4. Redis'e JSON formatında kaydet
+        token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
         if self._redis:
-            # KRİTİK DÜZELTME: user._id yerine user.id kullanıyoruz (Alias sayesinde)
-            session_data = json.dumps({
-                "email": user.email,
-                "user_id": str(user.id) 
-            })
-            # f-string içinde token'ı anahtar olarak kullanıyoruz
-            await self._redis.set(f"token:{token}", session_data, ex=3600)
-            
+            session_data = json.dumps(
+                {
+                    "email": user.email,
+                    "user_id": str(user.id),
+                    "role": user.role,
+                }
+            )
+            await self._redis.set(
+                f"token:{token}", session_data, ex=self.expire_seconds
+            )
         return {"token": token}
+    async def validate_token(self, token: str) -> dict:
+        """Token'ı doğrular. Önce Redis'e, sonra JWT'ye bakar."""
+        if self._redis:
+            session_data = await self._redis.get(f"token:{token}")
+            if session_data:
+                return json.loads(session_data)
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            return {
+                "email": payload.get("sub"),
+                "user_id": payload.get("user_id"),
+                "role": payload.get("role", "user"),
+            }
+        except jwt.ExpiredSignatureError:
+            raise UnauthorizedException("Token süresi dolmuş")
+        except jwt.InvalidTokenError:
+            raise UnauthorizedException("Geçersiz token")

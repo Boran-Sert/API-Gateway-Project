@@ -1,29 +1,20 @@
 """ RMM Seviye - 3 HATEOAS uyumlu response oluşturma """
-
 from typing import Any, Callable, Optional
-
-
 class HateoasLink:
     """Tek bir HATEOAS linkini temsil eder."""
-
     def __init__(self, href: str, method: str = "GET", rel: str | None = None):
         self.href = href
         self.method = method
         self.rel = rel
-
     def to_dict(self) -> dict[str, str]:
         result = {"href": self.href, "method": self.method}
         if self.rel:
             result["rel"] = self.rel
         return result
-
-
 class HateoasBuilder:
     """HATEOAS ile uyumlu response oluşturur (OCP uyumlu)."""
-
     def __init__(self, base_url: str = "/api/v1"):
         self.base_url = base_url
-
     def build_response(
         self, data: dict[str, Any], links: dict[str, HateoasLink]
     ) -> dict[str, Any]:
@@ -32,7 +23,6 @@ class HateoasBuilder:
             **data,
             "_links": {name: link.to_dict() for name, link in links.items()},
         }
-
     def collection_response(
         self,
         items: list,
@@ -44,7 +34,6 @@ class HateoasBuilder:
     ) -> dict[str, Any]:
         """
         Koleksiyon için paginated HATEOAS response üretir.
-
         Args:
             items: Pydantic model veya dict listesi.
             resource_name: Kaynak adı (URL'de kullanılır).
@@ -56,8 +45,6 @@ class HateoasBuilder:
         """
         total_pages = (total + per_page - 1) // per_page if per_page > 0 else 0
         base = f"{self.base_url}/{resource_name}"
-
-        # Koleksiyon düzeyinde navigasyon linkleri
         links: dict[str, HateoasLink] = {
             "self": HateoasLink(href=f"{base}?page={page}&per_page={per_page}"),
             "create": HateoasLink(href=base, method="POST"),
@@ -70,13 +57,10 @@ class HateoasBuilder:
             links["next"] = HateoasLink(
                 href=f"{base}?page={page + 1}&per_page={per_page}"
             )
-
-        # Strategy Pattern: Dışarıdan verilen serializer ile öğeleri dönüştür
         if item_serializer:
             serialized_items = [item_serializer(item) for item in items]
         else:
             serialized_items = items
-
         return {
             "data": serialized_items,
             "meta": {"page": page, "per_page": per_page, "total": total},

@@ -20,3 +20,7 @@ prometheus-fastapi-instrumentator>=7.0.0,<8.0.0
 
 # ──── Logging ────
 python-json-logger>=2.0.0,<3.0.0
+
+# ──── Environment ────
+python-dotenv>=1.0.0
+PyYAML>=6.0

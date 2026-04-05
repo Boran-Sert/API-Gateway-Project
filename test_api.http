@@ -1,44 +1,39 @@
-# ==========================================
-# MİKROSERVİS UÇTAN UCA TEST DOSYASI
-# ==========================================
-
+### ==========================================
+### DEĞİŞKENLER (Sonlarında boşluk olmamalı!)
+### ==========================================
 @apiGateway = http://localhost:8000
-@authService = http://localhost:8001
+@productId = 89fb3f84-1413-4dda-9682-ab678903a246
 
-# ID'leri test ederken oluşturulan ürün/kullanıcı ID'lerini buraya yapıştır
-@productId = ae302f79-0d34-47a8-8ae0-5528778c212d
-@userId = cd69df6f-57d6-4a75-a7fc-041cab360b71
 
 ### ==========================================
-### BÖLÜM 1: AUTH SERVİSİ (KİMLİK DOĞRULAMA)
+### BÖLÜM 1: AUTH SERVİSİ
 ### ==========================================
 
 ### 1.1 Yeni Kullanıcı Kaydı
-POST {{authService}}/auth/register
+POST {{apiGateway}}/api/auth/register
 Content-Type: application/json
 
 {
-    "email": "admin@example.com",
-    "password": "password123"
+  "email": "admin@example.com",
+  "password": "password123"
 }
 
-### 1.2 Giriş Yap ve Token Al (Bunu çalıştırdığında token otomatik hafızaya alınır)
+### 1.2 Giriş Yap ve Token Al
 # @name loginRequest
-POST {{authService}}/auth/login
+POST {{apiGateway}}/api/auth/login
 Content-Type: application/json
 
 {
-    "email": "test@example.com",
-    "password": "password123"
+  "email": "admin@example.com",
+  "password": "password123"
 }
 
 
 ### ==========================================
-### BÖLÜM 2: PRODUCT SERVİSİ (ÜRÜN YÖNETİMİ)
-### Gateway Üzerinden
+### BÖLÜM 2: PRODUCT SERVİSİ
 ### ==========================================
 
-### 2.1 Yeni Ürün Ekle (Admin Yetkisi Gerektirir)
+### 2.1 Yeni Ürün Ekle
 POST {{apiGateway}}/api/products
 Authorization: Bearer {{loginRequest.response.body.token}}
 Content-Type: application/json
@@ -54,7 +49,7 @@ Content-Type: application/json
 GET {{apiGateway}}/api/products
 Authorization: Bearer {{loginRequest.response.body.token}}
 
-### 2.3 Tek Bir Ürün Getir (Üstteki listeden dönen id'yi @productId kısmına yaz)
+### 2.3 Tek Bir Ürün Getir
 GET {{apiGateway}}/api/products/{{productId}}
 Authorization: Bearer {{loginRequest.response.body.token}}
 
@@ -76,17 +71,14 @@ Authorization: Bearer {{loginRequest.response.body.token}}
 
 
 ### ==========================================
-### BÖLÜM 3: USER SERVİSİ (KULLANICI PROFİLLERİ)
-### Gateway Üzerinden
+### BÖLÜM 3: USER SERVİSİ
 ### ==========================================
 
 ### 3.1 Kendi Profilimi Getir
-# Token içindeki ID ve Email bilgisini kullanarak işlem yapar
 GET {{apiGateway}}/api/users/me
 Authorization: Bearer {{loginRequest.response.body.token}}
 
 ### 3.2 Profilimi Güncelle
-# Kodunda /users/{id} yerine /users/me tanımlı olduğu için bu şekilde güncellendi
 PUT {{apiGateway}}/api/users/me
 Authorization: Bearer {{loginRequest.response.body.token}}
 Content-Type: application/json
@@ -94,5 +86,19 @@ Content-Type: application/json
 {
   "username": "boransert",
   "full_name": "Boran Sert",
-  "bio": "API Gateway geliştiricisi"
-}
+  "bio": "API Gateway Gelistiricisi"
+}
+
+### ==========================================
+### HATA TESPİT (DEBUG) BÖLÜMÜ - GATEWAY BYPASS
+### ==========================================
+
+
+### TEST 2: Product Servisi Gerçekte Nerede?
+GET http://localhost:8003/products
+
+### TEST 3: Auth Servisi Validate İşlemi Çalışıyor Mu?
+# Dikkat: Yukarıdan aldığın geçerli token'ı buraya yapıştır
+POST http://localhost:8001/auth/validate
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBleGFtcGxlLmNvbSIsInVzZXJfaWQiOiI0MGZjYTFjMy00ZGRmLTRiMzItYTY0ZS02ZmY0N2E3ZjM1MmYiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3NzU0MTQ3MjB9.fJQv6S16SIUxFEUJtC9FKyCTlira0EEn0qGRXUhK6pk
+Content-Type: application/json

@@ -1,13 +1,10 @@
 from locust import HttpUser, task, between
 import random
-
 class ProductServiceSimulator(HttpUser):
     """
-    
     Her kullanici, işlemler arasinda 1 ile 3 saniye arasi rastgele bekler.
     """
     wait_time = between(1, 3)
-
     @task(3)
     def view_products(self):
         """
@@ -19,7 +16,6 @@ class ProductServiceSimulator(HttpUser):
                 response.success()
             else:
                 response.failure(f"Listeleme Başarisiz: {response.status_code}")
-
     @task(1)
     def add_product(self):
         """
@@ -31,7 +27,6 @@ class ProductServiceSimulator(HttpUser):
             "category": "Yük Testi",
             "stock": random.randint(1, 100)
         }
-        
         with self.client.post("/products", json=new_product, catch_response=True) as response:
             if response.status_code == 201:
                 response.success()

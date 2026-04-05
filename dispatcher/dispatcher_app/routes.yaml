@@ -1,0 +1,32 @@
+routes:
+  # 1. USER SERVICE
+  # Dış: /api/users/me -> İç: http://user-service:8002/me
+  # strip_prefix: true ile /api/users atılır, geriye /me kalır.
+  - match_prefix: "/api/users"
+    target_url: "http://user-service:8002"
+    require_auth: true
+    strip_prefix: true
+
+  # 2. PRODUCT SERVICE
+  # Dış: /api/products -> İç: http://product-service:8003/products
+  # strip_prefix: true ile /api/products silinir, servis /products beklediği için target'a eklenir.
+  - match_prefix: "/api/products"
+    target_url: "http://product-service:8003/products"
+    require_auth: true
+    strip_prefix: true
+
+  # 3. AUTH SERVICE - VALIDATE (Öncelikli Rota)
+  # Bu rota /api/auth'un daha spesifik bir halidir, bu yüzden ÜSTTE olmalıdır.
+  # Dış: /api/auth/validate -> İç: http://auth-service:8000/auth/validate
+  - match_prefix: "/api/auth/validate"
+    target_url: "http://auth-service:8000/auth/validate"
+    require_auth: false
+    strip_prefix: true
+
+  # 4. AUTH SERVICE - LOGIN/REGISTER
+  # Dış: /api/auth/login -> İç: http://auth-service:8000/auth/login
+  # strip_prefix: true ile /api/auth silinir, geriye /login kalır. Target'taki /auth ile birleşir.
+  - match_prefix: "/api/auth"
+    target_url: "http://auth-service:8000/auth"
+    require_auth: false
+    strip_prefix: true

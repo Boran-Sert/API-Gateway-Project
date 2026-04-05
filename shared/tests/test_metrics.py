@@ -1,19 +1,13 @@
 """ Prometheus Metrics Testleri """
-
 from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from shared.metrics import setup_metrics, REQUEST_COUNT, REQUEST_LATENCY
-
 def test_request_count_metric_exists():
     """REQUEST_COUNT metriği oluşturulmuş olmalı."""
     assert REQUEST_COUNT is not None
-
-
 def test_request_latency_metric_exists():
     """REQUEST_LATENCY histogramı oluşturulmuş olmalı."""
     assert REQUEST_LATENCY is not None
-
-
 def test_setup_metrics_adds_metrics_endpoint():
     """/metrics endpoint'i uygulama başladığında eklenmiş olmalı."""
     app = FastAPI()

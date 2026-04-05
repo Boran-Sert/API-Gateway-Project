@@ -1,38 +1,28 @@
 from fastapi import FastAPI, Depends, Query, status
+from dotenv import load_dotenv
+load_dotenv()
 from product_service_app.services.product_service import ProductService
 from product_service_app.models.product import ProductCreate, ProductResponse
 from product_service_app.db import lifespan
+from product_service_app.repositories.product_repository import ProductRepository
 from shared.exceptions import AppException, app_exception_handler
 from shared.logging import setup_logging
 from shared.security import RoleChecker
 from shared.middleware import LoggingMiddleware
 from shared.metrics import setup_metrics
-
 app = FastAPI(
     title="Product Service", 
     version="1.0.0",
     lifespan=lifespan
 )
-
-# Initialize logger for this service
 logger = setup_logging("product-service")
-
-# Hata yakalama mekanizmasını ekle (örn: NotFoundException için 404 dönmek)
 app.add_exception_handler(AppException, app_exception_handler)
-
-# Prometheus metriklerini ayarla
 setup_metrics(app, "product-service")
-
-# Add the logging middleware
 app.add_middleware(LoggingMiddleware, logger=logger)
-
-# Dependency Injection
-def get_product_service():
-    return ProductService()
-
-# --- 1. GET: Ürün Listeleme ---
-# Tüm token sahipleri (admin/user) erişebilir
-# Dispatcher zaten token'ı doğruladığı için burada ek bir role check gerekmez.
+def get_product_repository():
+    return ProductRepository()
+def get_product_service(repo: ProductRepository = Depends(get_product_repository)):
+    return ProductService(repository=repo)
 @app.get("/products", include_in_schema=True)
 async def get_products(
     page: int = Query(1, ge=1), 
@@ -43,10 +33,6 @@ async def get_products(
     Tüm ürünleri sayfalama ve HATEOAS desteği ile döner.
     """
     return await service.get_all_paginated(page, limit)
-
-# --- 2. GET: Tek Ürün Getirme ---
-# Tüm token sahipleri (admin/user) erişebilir
-# Dispatcher zaten token'ı doğruladığı için burada ek bir role check gerekmez.
 @app.get("/products/{product_id}")
 async def get_product(
     product_id: str,
@@ -56,9 +42,6 @@ async def get_product(
     ID ile tek bir ürün getirir.
     """
     return await service.get_product_by_id(product_id)
-
-# --- 3. POST: Yeni Ürün Ekleme ---
-# Sadece 'admin' rolüne sahip kullanıcılar erişebilir
 @app.post(
     "/products", 
     status_code=status.HTTP_201_CREATED, 
@@ -73,9 +56,6 @@ async def create_product(
     Yeni bir ürün oluşturur ve 201 Created döner.
     """
     return await service.create_product(product)
-
-# --- 4. PUT: Ürün Güncelleme ---
-# Sadece 'admin' rolüne sahip kullanıcılar erişebilir
 @app.put("/products/{product_id}",
          dependencies=[Depends(RoleChecker(["admin"]))])
 async def update_product(
@@ -87,9 +67,6 @@ async def update_product(
     Mevcut bir ürünü günceller.
     """
     return await service.update_product(product_id, product)
-
-# --- 5. DELETE: Ürün Silme ---
-# Sadece 'admin' rolüne sahip kullanıcılar erişebilir
 @app.delete("/products/{product_id}", status_code=status.HTTP_200_OK, dependencies=[Depends(RoleChecker(["admin"]))])
 async def delete_product(
     product_id: str,
@@ -99,8 +76,6 @@ async def delete_product(
     Bir ürünü siler.
     """
     return await service.delete_product(product_id)
-
-# --- 6. HEALTH CHECK ---
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "product-service"}

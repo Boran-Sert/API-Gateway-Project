@@ -1,21 +1,16 @@
 from fastapi import Request
 from fastapi.responses import JSONResponse
-
 """Sistem hata yönetim merkezi """
-
 class AppException(Exception):
     """
     Sistemdeki tüm özel hataların miras alacağı temel sınıf.
     FastAPI hata yakalarken sadece burayı kullanacak.
     """
     def __init__(self, status_code: int, detail: str, error_code: str):
-        self.status_code = status_code  # Örn: 404, 401, 500 vb.
-        self.detail = detail            # Kullanıcıya gösterilecek mesaj
-        self.error_code = error_code    # Sistem içindeki standart hata kodu (Örn: "USER_NOT_FOUND")
-        
-        # Exception sınıfını başlatıyoruz
+        self.status_code = status_code                          
+        self.detail = detail                                            
+        self.error_code = error_code                                                                
         super().__init__(self.detail)
-
 class NotFoundException(AppException):
     """Aranılan kaynak bulunamadığında 404 döner."""
     def __init__(self, resource_name: str, resource_id: str):
@@ -24,8 +19,6 @@ class NotFoundException(AppException):
             detail=f"{resource_name} bulunamadı: '{resource_id}'",
             error_code="RESOURCE_NOT_FOUND"
         )
-
-
 class UnauthorizedException(AppException):
     """Yetkisiz erişim denemelerinde (Token yok/geçersiz) 401 döner."""
     def __init__(self, detail: str = "Geçersiz veya süresi dolmuş token tespit edildi."):
@@ -34,8 +27,6 @@ class UnauthorizedException(AppException):
             detail=detail,
             error_code="UNAUTHORIZED"
         )
-
-
 class ConflictException(AppException):
     """Zaten var olan veriyi tekrar oluşturma (Örn: aynı email) denemesinde 409 döner."""
     def __init__(self, detail: str):
@@ -44,8 +35,6 @@ class ConflictException(AppException):
             detail=detail,
             error_code="CONFLICT"
         )
-
-
 class ValidationException(AppException):
     """Gelen verinin doğrulama kurallarına uymaması durumunda 422 döner."""
     def __init__(self, detail: str):
@@ -54,7 +43,6 @@ class ValidationException(AppException):
             detail=detail,
             error_code="VALIDATION_ERROR"
         )
-
 class ForbiddenException(AppException):
     """Kullanıcının belirli bir kaynağa/işleme erişim yetkisi olmadığında 403 döner."""
     def __init__(self, detail: str = "Bu kaynak/işlem için yetkiniz bulunmamaktadır."):
@@ -63,8 +51,6 @@ class ForbiddenException(AppException):
             detail=detail,
             error_code="FORBIDDEN"
         )
-
-
 class ServiceUnavailableException(AppException):
     """Dispatcher'ın hedef mikroservise bağlanamadığı durumda 503 döner."""
     def __init__(self, service_name: str):
@@ -73,7 +59,6 @@ class ServiceUnavailableException(AppException):
             detail=f"{service_name} servisine şu an ulaşılamıyor. Lütfen daha sonra tekrar deneyin.",
             error_code="SERVICE_UNAVAILABLE"
         )
-
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     """ FastAPI exception handler - HATEOAS uyumlu hata yanıtı """
     return JSONResponse(
@@ -89,5 +74,4 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
                 "docs": {"href": "/docs"},
             },
         },
-        
     )
