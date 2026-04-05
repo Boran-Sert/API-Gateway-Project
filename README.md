@@ -117,7 +117,7 @@ Sistemin stabilitesini ölçmek adına K6 test aracı ile Sanal Kullanıcı (VU)
 ### Başarı ve İzleme (Grafana Dashboard)
 Sunucu yükünü ve oluşturulan Prometheus ölçümlerini (`http_requests_total`, `request_duration`) gerçek zamanlı (Real-time) Grafana raporlamasında görüntüleyebiliyoruz.
 
-![Grafana Dashboard](src/grafana.png)
+![Grafana Dashboard](scr/grafana.png)
 
 ### K6 Yük (Load) Testi Sonuçları
 
